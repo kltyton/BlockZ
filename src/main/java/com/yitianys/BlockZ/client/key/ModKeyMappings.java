@@ -2,10 +2,8 @@ package com.yitianys.BlockZ.client.key;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import com.yitianys.BlockZ.BlockZ;
-import com.yitianys.BlockZ.client.ClientSettings;
 import com.yitianys.BlockZ.compat.TaczProneCompat;
 import com.yitianys.BlockZ.config.BlockZConfigs;
-import com.yitianys.BlockZ.network.DayzToggleRequestC2S;
 import com.yitianys.BlockZ.network.LeanUpdateC2S;
 import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.network.ProneUpdateC2S;
@@ -15,7 +13,6 @@ import com.yitianys.BlockZ.util.ProneManager;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.InputEvent;
@@ -29,7 +26,6 @@ import org.lwjgl.glfw.GLFW;
 
 @Mod.EventBusSubscriber(modid = BlockZ.MODID, value = Dist.CLIENT)
 public class ModKeyMappings {
-    public static KeyMapping OPEN_DAYZ;
     public static KeyMapping ROTATE_ITEM;
     public static KeyMapping LEAN_LEFT;
     public static KeyMapping LEAN_RIGHT;
@@ -44,7 +40,6 @@ public class ModKeyMappings {
     private static float focusFovMultiplier = 1.0F;
 
     public static void register(RegisterKeyMappingsEvent event) {
-        OPEN_DAYZ = new KeyMapping("key.blockz.open_dayz", InputConstants.KEY_I, "key.categories.inventory");
         ROTATE_ITEM = new KeyMapping("key.blockz.rotate_item", InputConstants.KEY_SPACE, "key.categories.inventory");
         LEAN_LEFT = new KeyMapping("key.blockz.lean_left",
                 KeyConflictContext.IN_GAME,
@@ -66,7 +61,6 @@ public class ModKeyMappings {
                 InputConstants.Type.MOUSE,
                 GLFW.GLFW_MOUSE_BUTTON_MIDDLE,
                 "key.categories.blockz");
-        event.register(OPEN_DAYZ);
         event.register(ROTATE_ITEM);
         event.register(LEAN_LEFT);
         event.register(LEAN_RIGHT);
@@ -92,14 +86,6 @@ public class ModKeyMappings {
     public static void onKeyInput(InputEvent.Key event) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
-        if (OPEN_DAYZ != null && OPEN_DAYZ.consumeClick()) {
-            if (!ClientSettings.dayzToggleAllowed) {
-                mc.player.sendSystemMessage(Component.translatable("msg.blockz.dayz_toggle_denied"));
-                return;
-            }
-            BlockZ.LOGGER.info("Toggling DayZ UI. Current state: {}. Sending: {}", ClientSettings.dayzEnabled, !ClientSettings.dayzEnabled);
-            NetworkHandler.CHANNEL.sendToServer(new DayzToggleRequestC2S(!ClientSettings.dayzEnabled));
-        }
         if (handleProneJumpInput(mc, event)) {
             return;
         }

@@ -67,8 +67,11 @@ public class SyncGridRulesS2C {
             String value = buf.readUtf();
             int w = buf.readVarInt();
             int h = buf.readVarInt();
+            int capacity = buf.readVarInt();
+            int columns = buf.readVarInt();
+            Integer color = buf.readBoolean() ? buf.readInt() : null;
             if (item != null) {
-                nbtRules.add(new ItemSizeManager.NbtRule(item, key, value, w, h));
+                nbtRules.add(new ItemSizeManager.NbtRule(item, key, value, w, h, capacity, columns, color));
             }
         }
 
@@ -123,6 +126,10 @@ public class SyncGridRulesS2C {
             buf.writeUtf(rule.nbtValue());
             buf.writeVarInt(rule.width());
             buf.writeVarInt(rule.height());
+            buf.writeVarInt(rule.slots());
+            buf.writeVarInt(rule.columns());
+            buf.writeBoolean(rule.color() != null);
+            if (rule.color() != null) buf.writeInt(rule.color());
         }
 
         buf.writeVarInt(customSlots.size());

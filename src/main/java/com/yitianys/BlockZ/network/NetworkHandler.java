@@ -7,7 +7,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 
 @SuppressWarnings({"deprecation", "removal"})
 public class NetworkHandler {
-    public static final String PROTOCOL = "1";
+    public static final String PROTOCOL = "4";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation("blockz", "channel"),
             () -> PROTOCOL, PROTOCOL::equals, PROTOCOL::equals
@@ -15,6 +15,9 @@ public class NetworkHandler {
 
     public static void init() {
         int id = 0;
+        CHANNEL.messageBuilder(SyncEquipmentS2C.class, id++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(SyncEquipmentS2C::encode).decoder(SyncEquipmentS2C::decode)
+                .consumerMainThread(SyncEquipmentS2C::handle).add();
         CHANNEL.messageBuilder(LootPickupC2S.class, id, NetworkDirection.PLAY_TO_SERVER)
                 .encoder(LootPickupC2S::encode)
                 .decoder(LootPickupC2S::decode)
@@ -43,24 +46,6 @@ public class NetworkHandler {
                 .encoder(RotateItemC2S::encode)
                 .decoder(RotateItemC2S::decode)
                 .consumerMainThread(RotateItemC2S::handle)
-                .add();
-        id++;
-        CHANNEL.messageBuilder(DayzToggleRequestC2S.class, id, NetworkDirection.PLAY_TO_SERVER)
-                .encoder(DayzToggleRequestC2S::encode)
-                .decoder(DayzToggleRequestC2S::decode)
-                .consumerMainThread(DayzToggleRequestC2S::handle)
-                .add();
-        id++;
-        CHANNEL.messageBuilder(DayzToggleStateS2C.class, id, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder(DayzToggleStateS2C::encode)
-                .decoder(DayzToggleStateS2C::decode)
-                .consumerMainThread(DayzToggleStateS2C::handle)
-                .add();
-        id++;
-        CHANNEL.messageBuilder(DayzTogglePermissionS2C.class, id, NetworkDirection.PLAY_TO_CLIENT)
-                .encoder(DayzTogglePermissionS2C::encode)
-                .decoder(DayzTogglePermissionS2C::decode)
-                .consumerMainThread(DayzTogglePermissionS2C::handle)
                 .add();
         id++;
         CHANNEL.messageBuilder(PacketReloadConfigS2C.class, id, NetworkDirection.PLAY_TO_CLIENT)

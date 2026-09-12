@@ -30,6 +30,7 @@ public final class LeanManager {
     private static final Map<UUID, Long> SERVER_LEAN_LAST_UPDATE_NANOS = new ConcurrentHashMap<>();
 
     public static LeanState getLeanState(Player player) {
+        if (!BlockZConfigs.isLeanEnabled()) return LeanState.NONE;
         CompoundTag data = player.getPersistentData();
         String stateName = data.getString(LEAN_TAG);
         try {
@@ -40,6 +41,7 @@ public final class LeanManager {
     }
 
     public static void setLeanState(Player player, LeanState state) {
+        if (!BlockZConfigs.isLeanEnabled()) state = LeanState.NONE;
         CompoundTag data = player.getPersistentData();
         if (state == LeanState.NONE) {
             data.remove(LEAN_TAG);
@@ -53,10 +55,12 @@ public final class LeanManager {
     }
 
     public static void setClientLeanState(UUID uuid, LeanState state) {
+        if (!BlockZConfigs.isLeanEnabled()) state = LeanState.NONE;
         CLIENT_LEAN_STATES.put(uuid, state);
     }
 
     public static LeanState getClientLeanState(UUID uuid) {
+        if (!BlockZConfigs.isLeanEnabled()) return LeanState.NONE;
         return CLIENT_LEAN_STATES.getOrDefault(uuid, LeanState.NONE);
     }
 
@@ -68,6 +72,7 @@ public final class LeanManager {
     }
 
     public static float getAppliedLeanProgress(Player player) {
+        if (!BlockZConfigs.isLeanEnabled()) return 0.0F;
         if (player.level().isClientSide()) {
             return getSmoothLeanProgress(player.getUUID());
         }
@@ -75,6 +80,7 @@ public final class LeanManager {
     }
 
     public static float getSmoothLeanProgress(UUID uuid) {
+        if (!BlockZConfigs.isLeanEnabled()) return 0.0F;
         Float raw = CLIENT_LEAN_PROGRESS.get(uuid);
         return raw != null ? raw : 0.0F;
     }
@@ -88,6 +94,7 @@ public final class LeanManager {
     }
 
     public static float getLeanRollDegrees(float progress) {
+        if (!BlockZConfigs.isLeanEnabled()) return 0.0F;
         return -progress * getLeanAngleDegrees();
     }
 
@@ -132,6 +139,11 @@ public final class LeanManager {
     }
 
     private static void updateLeanProgress(Player player, UUID uuid, LeanState target, Map<UUID, Float> progressMap, Map<UUID, Long> lastUpdateMap) {
+        if (!BlockZConfigs.isLeanEnabled()) {
+            progressMap.remove(uuid);
+            lastUpdateMap.remove(uuid);
+            return;
+        }
         float targetVal = 0.0F;
         if (target == LeanState.LEFT) targetVal = -1.0F;
         else if (target == LeanState.RIGHT) targetVal = 1.0F;

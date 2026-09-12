@@ -5,42 +5,72 @@ import net.minecraftforge.common.util.INBTSerializable;
 import net.minecraftforge.items.ItemStackHandler;
 
 public class PlayerBackpack implements INBTSerializable<CompoundTag> {
+    private final net.minecraft.world.entity.player.Player owner;
+    public PlayerBackpack() { this(null); }
+    public PlayerBackpack(net.minecraft.world.entity.player.Player owner) { this.owner = owner; }
+
     public static final int SLOT_BACKPACK = 0;
     public static final int SLOT_VEST = 1;
     public static final int SLOT_GLOVES = 2;
     public static final int SLOT_MASK = 3;
     public static final int SLOT_COUNT = 4;
 
-    private final ItemStackHandler inventory = new ItemStackHandler(SLOT_COUNT);
-    private boolean dayzEnabled = true;
+    private final ItemStackHandler inventory = new ItemStackHandler(SLOT_COUNT) {
+        @Override
+        public boolean isItemValid(int slot, net.minecraft.world.item.ItemStack stack) {
+            return owner == null ? !(stack.getItem() instanceof com.yitianys.BlockZ.item.ClothingItem)
+                    : com.yitianys.BlockZ.equipment.EquipmentRules.acceptsSpecial(owner, slot, stack);
+        }
+    };
+
+    private final ItemStackHandler armorInventory = new ItemStackHandler(com.yitianys.BlockZ.config.EquipmentConfig.MAX_ARMOR_SLOTS) {
+        @Override public int getSlotLimit(int slot) { return 1; }
+        @Override public boolean isItemValid(int slot, net.minecraft.world.item.ItemStack stack) {
+            return owner == null ? com.yitianys.BlockZ.equipment.EquipmentRules.armorType(stack) != null
+                    : slot < com.yitianys.BlockZ.equipment.EquipmentSlots.unlocked(owner)
+                    && com.yitianys.BlockZ.equipment.EquipmentRules.acceptsArmor(owner, stack);
+        }
+    };
+    private int armorSlotUpgrades;
+    private boolean legacyArmorImported;
+    private boolean specialEquipmentMigrated;
+
+    public ItemStackHandler getArmorInventory() { return armorInventory; }
+    public int getArmorSlotUpgrades() { return armorSlotUpgrades; }
+    public void setArmorSlotUpgrades(int upgrades) { armorSlotUpgrades = net.minecraft.util.Mth.clamp(upgrades, 0, 3); }
+    public boolean hasImportedLegacyArmor() { return legacyArmorImported; }
+    public void markLegacyArmorImported() { legacyArmorImported = true; }
+    public boolean hasMigratedSpecialEquipment() { return specialEquipmentMigrated; }
+    public void markSpecialEquipmentMigrated() { specialEquipmentMigrated = true; }
 
     public ItemStackHandler getInventory() {
         ensureInventorySize();
         return inventory;
     }
 
-    public boolean isDayzEnabled() {
-        return dayzEnabled;
-    }
-
-    public void setDayzEnabled(boolean dayzEnabled) {
-        this.dayzEnabled = dayzEnabled;
-    }
-
     @Override
     public CompoundTag serializeNBT() {
         CompoundTag nbt = new CompoundTag();
         
-        // 始终完整保存所有槽位，确保数据持久化安全
-        // 即使 Curios 存在，我们也应保留自身 Capability 的数据作为备份或主存储
         nbt.put("Inventory", inventory.serializeNBT());
+        nbt.put("ArmorInventory", armorInventory.serializeNBT());
+        nbt.putInt("ArmorSlotUpgrades", armorSlotUpgrades);
+        nbt.putBoolean("LegacyArmorImported", legacyArmorImported);
+        nbt.putBoolean("SpecialEquipmentMigrated", specialEquipmentMigrated);
         
-        nbt.putBoolean("DayzEnabled", dayzEnabled);
         return nbt;
     }
 
     @Override
     public void deserializeNBT(CompoundTag nbt) {
+        if (nbt.contains("ArmorInventory")) {
+            CompoundTag saved = nbt.getCompound("ArmorInventory").copy();
+            saved.putInt("Size", com.yitianys.BlockZ.config.EquipmentConfig.MAX_ARMOR_SLOTS);
+            armorInventory.deserializeNBT(saved);
+        }
+        setArmorSlotUpgrades(nbt.getInt("ArmorSlotUpgrades"));
+        legacyArmorImported = nbt.getBoolean("LegacyArmorImported");
+        specialEquipmentMigrated = nbt.getBoolean("SpecialEquipmentMigrated");
         if (nbt.contains("Inventory")) {
             CompoundTag invNbt = nbt.getCompound("Inventory");
             int expectedSize = SLOT_COUNT;
@@ -50,18 +80,22 @@ public class PlayerBackpack implements INBTSerializable<CompoundTag> {
                 repairInventorySize(expectedSize);
             }
         }
-        if (nbt.contains("DayzEnabled")) {
-            dayzEnabled = nbt.getBoolean("DayzEnabled");
-        } else {
-            dayzEnabled = true;
-        }
+    }
+
+    public void copyProgressFrom(PlayerBackpack other) {
+        armorSlotUpgrades = other.armorSlotUpgrades;
+        legacyArmorImported = other.legacyArmorImported;
+        specialEquipmentMigrated = other.specialEquipmentMigrated;
     }
 
     public void copyFrom(PlayerBackpack other) {
+        copyProgressFrom(other);
+        for (int i = 0; i < armorInventory.getSlots(); i++) {
+            armorInventory.setStackInSlot(i, other.armorInventory.getStackInSlot(i).copy());
+        }
         for (int i = 0; i < SLOT_COUNT; i++) {
             this.inventory.setStackInSlot(i, other.inventory.getStackInSlot(i).copy());
         }
-        this.dayzEnabled = other.dayzEnabled;
     }
 
     private void ensureInventorySize() {

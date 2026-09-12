@@ -14,10 +14,8 @@ public class SyncConfigS2C {
     private final boolean enableGridSystem;
     private final double uiScale;
     private final boolean enableDayzInventory;
-    private final boolean allowPlayerToggleDayz;
     private final boolean showDayzHud;
     private final boolean enableHealthSystem;
-    private final boolean showDayzToggleChatHint;
     private final boolean enableNursingSystem;
     private final boolean enableBleeding;
     private final boolean enableBrokenLegs;
@@ -113,10 +111,8 @@ public class SyncConfigS2C {
         this.enableGridSystem = BlockZConfigs.isGridEnabled();
         this.uiScale = BlockZConfigs.getUiScale();
         this.enableDayzInventory = BlockZConfigs.isDayzInventoryEnabled();
-        this.allowPlayerToggleDayz = BlockZConfigs.getAllowPlayerToggleDayz();
         this.showDayzHud = BlockZConfigs.getShowDayzHud();
         this.enableHealthSystem = BlockZConfigs.isHealthSystemEnabled();
-        this.showDayzToggleChatHint = BlockZConfigs.getShowDayzToggleChatHint();
         this.enableNursingSystem = BlockZConfigs.isNursingEnabled();
         this.enableBleeding = BlockZConfigs.isBleedingEnabled();
         this.enableBrokenLegs = BlockZConfigs.isBrokenLegsEnabled();
@@ -124,7 +120,7 @@ public class SyncConfigS2C {
         this.brokenLegChanceMultiplier = BlockZConfigs.getBrokenLegChanceMultiplier();
         this.brokenLegMaxChance = BlockZConfigs.getBrokenLegMaxChance();
         this.enableVanillaBackpackLock = BlockZConfigs.getEnableVanillaBackpackLock();
-        this.initialPocketSlots = BlockZConfigs.getInitialPocketSlots();
+        this.initialPocketSlots = BlockZConfigs.initialPocketSlots.get();
         this.replaceVanillaWalkBobbing = BlockZConfigs.shouldReplaceVanillaWalkBobbing();
         this.walkSwayStrength = BlockZConfigs.getWalkSwayStrength();
         this.walkSwaySpeed = BlockZConfigs.getWalkSwaySpeed();
@@ -209,10 +205,8 @@ public class SyncConfigS2C {
         this.enableGridSystem = buf.readBoolean();
         this.uiScale = buf.readDouble();
         this.enableDayzInventory = buf.readBoolean();
-        this.allowPlayerToggleDayz = buf.readBoolean();
         this.showDayzHud = buf.readBoolean();
         this.enableHealthSystem = buf.readBoolean();
-        this.showDayzToggleChatHint = buf.readBoolean();
         this.enableNursingSystem = buf.readBoolean();
         this.enableBleeding = buf.readBoolean();
         this.enableBrokenLegs = buf.readBoolean();
@@ -305,10 +299,8 @@ public class SyncConfigS2C {
         buf.writeBoolean(enableGridSystem);
         buf.writeDouble(uiScale);
         buf.writeBoolean(enableDayzInventory);
-        buf.writeBoolean(allowPlayerToggleDayz);
         buf.writeBoolean(showDayzHud);
         buf.writeBoolean(enableHealthSystem);
-        buf.writeBoolean(showDayzToggleChatHint);
         buf.writeBoolean(enableNursingSystem);
         buf.writeBoolean(enableBleeding);
         buf.writeBoolean(enableBrokenLegs);
@@ -399,8 +391,8 @@ public class SyncConfigS2C {
         NetworkEvent.Context context = supplier.get();
         context.enqueueWork(() -> {
             BlockZConfigs.setSyncedValues(
-                gridCols, gridRows, enableGridSystem, uiScale, enableDayzInventory, allowPlayerToggleDayz,
-                showDayzHud, enableHealthSystem, showDayzToggleChatHint, enableNursingSystem, enableBleeding, enableBrokenLegs,
+                gridCols, gridRows, enableGridSystem, uiScale, enableDayzInventory,
+                showDayzHud, enableHealthSystem, enableNursingSystem, enableBleeding, enableBrokenLegs,
                 baseBleedingChance, brokenLegChanceMultiplier, brokenLegMaxChance, enableVanillaBackpackLock, initialPocketSlots,
                 replaceVanillaWalkBobbing, walkSwayStrength, walkSwaySpeed, idleSwayStrength,
                 walkSwayRequiresSprint, enableFocusZoom, focusFovMultiplierWalk, focusFovMultiplierSprint, focusFovSmoothing,

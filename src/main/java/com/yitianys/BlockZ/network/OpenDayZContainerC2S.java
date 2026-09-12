@@ -3,6 +3,7 @@ package com.yitianys.BlockZ.network;
 import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
+import com.yitianys.BlockZ.ui.DayZUiPolicy;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -67,6 +68,7 @@ public class OpenDayZContainerC2S {
             ServerPlayer player = ctx.getSender();
             if (player == null) return;
             if (!BlockZConfigs.isDayzInventoryEnabled()) return;
+            if (!DayZUiPolicy.shouldUseDayZ(player)) return;
 
             ServerLevel level = player.serverLevel();
 

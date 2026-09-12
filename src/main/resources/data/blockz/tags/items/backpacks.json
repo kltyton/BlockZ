@@ -1,8 +1,14 @@
 {
   "replace": false,
   "values": [
-    "blockz:small_backpack",
-    "blockz:medium_backpack",
-    "blockz:large_backpack"
+    "blockz:backpack_coyote",
+    "blockz:backpack_alice",
+    "blockz:backpack_czech",
+    "blockz:backpack_czechpouch",
+    "blockz:backpack_patrolpack",
+    {
+      "id": "#forge:backpacks",
+      "required": false
+    }
   ]
 }

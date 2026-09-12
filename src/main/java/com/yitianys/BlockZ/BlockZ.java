@@ -48,6 +48,9 @@ public class BlockZ {
         BlockZConfigs.register();
         DayZZombieConfig.register();
         context.registerConfig(ModConfig.Type.COMMON, BlockZConfigs.COMMON_SPEC);
+        context.registerConfig(ModConfig.Type.SERVER, com.yitianys.BlockZ.config.MedicalMappings.SPEC, "blockz-medical.toml");
+        modBus.addListener(com.yitianys.BlockZ.config.MedicalMappings::onConfig);
+        context.registerConfig(ModConfig.Type.SERVER, com.yitianys.BlockZ.config.EquipmentConfig.SPEC, "blockz-equipment.toml");
         context.registerConfig(ModConfig.Type.COMMON, DayZZombieConfig.COMMON_SPEC, "blockz/dayz_zombie.toml");
         NetworkHandler.init();
         ModEffects.EFFECTS.register(modBus);
@@ -58,11 +61,13 @@ public class BlockZ {
         ModCreativeTabs.CREATIVE_MODE_TABS.register(modBus);
         ModMenus.MENUS.register(modBus);
         modBus.addListener(this::commonSetup);
+        modBus.addListener(com.yitianys.BlockZ.compat.MeshEquipment::acceptProviders);
         MinecraftForge.EVENT_BUS.register(this);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
+            if (com.yitianys.BlockZ.compat.CuriosIntegration.isLoaded()) com.yitianys.BlockZ.compat.CuriosEquipment.register();
             ItemSizeManager.loadCustomSizes();
             ModEntities.registerSpawnPlacements();
         });
@@ -78,7 +83,7 @@ public class BlockZ {
                         ItemSizeManager.loadCustomSizes();
                         MinecraftServer server = context.getSource().getServer();
                         ModEvents.broadcastServerConfigs(server);
-                        context.getSource().sendSuccess(() -> Component.literal("BlockZ 配置已重载！"), true);
+                        context.getSource().sendSuccess(() -> Component.translatable("msg.blockz.command.reload_success"), true);
                         return 1;
                     })
                 )

@@ -65,20 +65,11 @@ public final class TaczAmmoCompat {
         }
 
         int[] extracted = new int[1];
-        player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-            ItemStackHandler equipment = cap.getInventory();
-            ItemStack vestStack = CuriosIntegration.getEquippedDirect(player, CuriosIntegration.SLOT_BODY);
-            if (vestStack.isEmpty()) {
-                vestStack = equipment.getStackInSlot(PlayerBackpack.SLOT_VEST);
-            }
-            extracted[0] += extractFromStorageStack(vestStack, gunStack, neededAmount - extracted[0], simulate);
-            if (extracted[0] < neededAmount) {
-                extracted[0] += extractFromStorageStack(player.getItemBySlot(EquipmentSlot.CHEST), gunStack, neededAmount - extracted[0], simulate);
-            }
-        });
-
-        if (extracted[0] < neededAmount) {
-            extracted[0] += extractFromStorageStack(player.getItemBySlot(EquipmentSlot.LEGS), gunStack, neededAmount - extracted[0], simulate);
+        ItemStack vest = com.yitianys.BlockZ.equipment.EquipmentSlots.special(player, PlayerBackpack.SLOT_VEST);
+        extracted[0] += extractFromStorageStack(vest, gunStack, neededAmount, simulate);
+        for (int i = 0; i < 4 && extracted[0] < neededAmount; i++) {
+            extracted[0] += extractFromStorageStack(com.yitianys.BlockZ.equipment.EquipmentSlots.armor(player, i),
+                    gunStack, neededAmount - extracted[0], simulate);
         }
         if (!simulate && extracted[0] > 0) {
             refreshOpenStorageMenu(player);

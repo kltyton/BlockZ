@@ -40,6 +40,7 @@ public class NestedStorageItemHandler implements IItemHandler {
         if (stackChanged) {
             if (cacheChanged) {
                 saveCurrent();
+                if (currentStack == observedStack) currentInventoryTag = readInventoryTag(currentStack);
             }
             loadFromStack(currentStack, currentSlots, currentInventoryTag);
             return;
@@ -63,7 +64,9 @@ public class NestedStorageItemHandler implements IItemHandler {
         if (currentStack.isEmpty() || inventoryTag.isEmpty()) {
             return;
         }
-        cachedHandler.deserializeNBT(inventoryTag);
+        CompoundTag resized = inventoryTag.copy();
+        resized.putInt("Size", Math.max(slots, inventoryTag.getInt("Size")));
+        cachedHandler.deserializeNBT(resized);
     }
 
     private void saveCurrent() {
@@ -117,13 +120,13 @@ public class NestedStorageItemHandler implements IItemHandler {
 
     private boolean isValidSlot(int slot) {
         refreshCache();
-        return slot >= 0 && slot < cachedHandler.getSlots();
+        return slot >= 0 && slot < observedSlotCount;
     }
 
     @Override
     public int getSlots() {
         refreshCache();
-        return cachedHandler.getSlots();
+        return observedSlotCount;
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import com.yitianys.BlockZ.util.ItemHandlerContainer;
+import com.yitianys.BlockZ.ui.DayZUiPolicy;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -47,6 +48,7 @@ public class RequestSwitchToDayZMenuC2S {
             ServerPlayer player = ctx.getSender();
             if (player == null) return;
             if (!BlockZConfigs.isDayzInventoryEnabled()) return;
+            if (!DayZUiPolicy.shouldUseDayZ(player)) return;
             
             // Check current open container
             AbstractContainerMenu menu = player.containerMenu;

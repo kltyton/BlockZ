@@ -1,13 +1,16 @@
 package com.yitianys.BlockZ.event;
 
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
+import com.yitianys.BlockZ.equipment.EquipmentSlots;
+import com.yitianys.BlockZ.equipment.EquipmentState;
+import com.yitianys.BlockZ.equipment.EquipmentRules;
+import com.yitianys.BlockZ.compat.CuriosEquipment;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.config.DayZZombieConfig;
 import com.yitianys.BlockZ.entity.CorpseEntity;
 import com.yitianys.BlockZ.entity.DayZZombieEntity;
-import com.yitianys.BlockZ.network.DayzTogglePermissionS2C;
-import com.yitianys.BlockZ.network.DayzToggleStateS2C;
 import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.network.SyncBackpackS2C;
 import com.yitianys.BlockZ.network.SyncGridRulesS2C;
@@ -55,7 +58,7 @@ public class ModEvents {
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            CuriosIntegration.importToCapability(player);
+            EquipmentState.initialize(player);
             syncPlayerState(player);
         }
     }
@@ -74,7 +77,7 @@ public class ModEvents {
     @SubscribeEvent
     public static void onPlayerRespawn(PlayerRespawnEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            CuriosIntegration.importToCapability(player);
+            EquipmentState.initialize(player);
             syncPlayerState(player);
         }
     }
@@ -86,6 +89,7 @@ public class ModEvents {
         }
         if (event.getTarget() instanceof Player trackedPlayer) {
             ProneManager.syncStateTo(trackingPlayer, trackedPlayer);
+            EquipmentState.syncTo(trackingPlayer, trackedPlayer);
         }
     }
 
@@ -96,11 +100,7 @@ public class ModEvents {
                 ItemStack stack = cap.getInventory().getStackInSlot(i);
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncBackpackS2C(i, stack));
             }
-            NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzToggleStateS2C(cap.isDayzEnabled()));
         });
-
-        boolean allowed = BlockZConfigs.getAllowPlayerToggleDayz() || player.hasPermissions(2);
-        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzTogglePermissionS2C(allowed));
         syncServerConfigs(player);
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncPlayerStatusS2C(
                 DayZPlayerStatusManager.getHealthPointsRatio(player),
@@ -130,24 +130,22 @@ public class ModEvents {
     @SubscribeEvent
     public static void onAttachCapabilitiesPlayer(AttachCapabilitiesEvent<Entity> event) {
         if (event.getObject() instanceof Player && !event.getObject().getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).isPresent()) {
-            event.addCapability(new ResourceLocation("blockz", "properties"), new PlayerBackpackProvider());
+            event.addCapability(new ResourceLocation("blockz", "properties"), new PlayerBackpackProvider((Player) event.getObject()));
         }
     }
 
     @SubscribeEvent
     public static void onPlayerCloned(Clone event) {
+        event.getOriginal().reviveCaps();
         event.getOriginal().getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(oldStore -> {
             event.getEntity().getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(newStore -> {
-                newStore.setDayzEnabled(oldStore.isDayzEnabled());
                 boolean keepInventory = event.getEntity().level().getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
-                if (keepInventory || !event.isWasDeath()) {
-                    for (int i = 0; i < 4; i++) {
-                        newStore.getInventory().setStackInSlot(i, oldStore.getInventory().getStackInSlot(i).copy());
-                    }
-                }
+                newStore.copyProgressFrom(oldStore);
+                if (keepInventory || !event.isWasDeath()) newStore.copyFrom(oldStore);
             });
         });
 
+        event.getOriginal().invalidateCaps();
         if (!event.isWasDeath()) {
             DayZPlayerStatusManager.copyPersistentStatus(event.getOriginal(), event.getEntity());
             ProneManager.copyPersistentState(event.getOriginal(), event.getEntity());
@@ -175,25 +173,21 @@ public class ModEvents {
                     return;
                 }
 
+                if (player.containerMenu instanceof com.yitianys.BlockZ.menu.DayZInventoryMenu menu) menu.flushEquipmentStorage();
+                CuriosIntegration.importToCapability(player);
                 CorpseEntity corpse = new CorpseEntity(player.level(), player);
                 player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-                    IItemHandler inv = cap.getInventory();
-                    corpse.setItem(0, inv.getStackInSlot(0).copy());
-                    corpse.setItem(1, inv.getStackInSlot(1).copy());
-                    corpse.setItem(7, inv.getStackInSlot(3).copy());
-                    corpse.setItem(8, inv.getStackInSlot(2).copy());
-
-                    if (inv instanceof ItemStackHandler h) {
-                        for (int i = 0; i < h.getSlots(); i++) {
-                            h.setStackInSlot(i, ItemStack.EMPTY);
-                        }
+                    int[] corpseSlots = {0, 1, 8, 7};
+                    for (int i = 0; i < 4; i++) {
+                        if (!CuriosIntegration.hasSlotHandler(player, EquipmentRules.curioSlot(i)))
+                            corpse.setItem(corpseSlots[i], deathDrop(cap.getInventory().getStackInSlot(i)));
+                        cap.getInventory().setStackInSlot(i, ItemStack.EMPTY);
+                        corpse.setItem(2 + i, deathDrop(cap.getArmorInventory().getStackInSlot(i)));
+                        cap.getArmorInventory().setStackInSlot(i, ItemStack.EMPTY);
                     }
                 });
 
-                corpse.setItem(2, player.getInventory().getArmor(2).copy());
-                corpse.setItem(3, player.getInventory().getArmor(1).copy());
-                corpse.setItem(4, player.getInventory().getArmor(3).copy());
-                corpse.setItem(5, player.getInventory().getArmor(0).copy());
+                for (int i = 0; i < 4; i++) corpse.setItem(45 + i, player.getInventory().armor.get(i).copy());
                 corpse.setItem(6, player.getOffhandItem().copy());
 
                 for (int i = 0; i < 9; i++) {
@@ -208,22 +202,30 @@ public class ModEvents {
                 }
 
                 player.level().addFreshEntity(corpse);
+                if (CuriosIntegration.isLoaded()) CuriosEquipment.collectCorpseDrops(player, corpse);
                 player.getInventory().clearContent();
             }
         }
     }
 
     private static void dropBackpackCapabilityItems(ServerPlayer player) {
+        if (player.containerMenu instanceof com.yitianys.BlockZ.menu.DayZInventoryMenu menu) menu.flushEquipmentStorage();
         player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-            ItemStackHandler handler = cap.getInventory();
-            for (int i = 0; i < handler.getSlots(); i++) {
-                ItemStack stack = handler.getStackInSlot(i);
-                if (!stack.isEmpty()) {
-                    player.spawnAtLocation(stack.copy(), 0.0F);
-                    handler.setStackInSlot(i, ItemStack.EMPTY);
+            for (int i = 0; i < 4; i++) {
+                if (!CuriosIntegration.hasSlotHandler(player, EquipmentRules.curioSlot(i))) {
+                    ItemStack stack = deathDrop(cap.getInventory().getStackInSlot(i));
+                    if (!stack.isEmpty()) player.spawnAtLocation(stack, 0.0F);
                 }
+                cap.getInventory().setStackInSlot(i, ItemStack.EMPTY);
+                ItemStack armor = deathDrop(cap.getArmorInventory().getStackInSlot(i));
+                if (!armor.isEmpty()) player.spawnAtLocation(armor, 0.0F);
+                cap.getArmorInventory().setStackInSlot(i, ItemStack.EMPTY);
             }
         });
+    }
+
+    private static ItemStack deathDrop(ItemStack stack) {
+        return EnchantmentHelper.hasVanishingCurse(stack) ? ItemStack.EMPTY : stack.copy();
     }
 
     @SubscribeEvent
@@ -251,9 +253,6 @@ public class ModEvents {
             boolean keepInventory = player.level().getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
             if (!player.level().isClientSide && !keepInventory) {
                 event.getDrops().removeIf(itemEntity -> itemEntity.getItem().is(ModItems.LOCK_ITEM.get()));
-                if (BlockZConfigs.getEnableCorpse()) {
-                    event.getDrops().clear();
-                }
             }
         }
     }

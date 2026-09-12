@@ -1,6 +1,9 @@
 package com.yitianys.BlockZ.menu;
 
 import com.yitianys.BlockZ.BlockZ;
+import com.yitianys.BlockZ.equipment.EquipmentRules;
+import com.yitianys.BlockZ.equipment.EquipmentSlots;
+import com.yitianys.BlockZ.equipment.SpecialEquipmentHandler;
 import com.yitianys.BlockZ.capability.PlayerBackpack;
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
 import com.yitianys.BlockZ.client.gui.UIConstants;
@@ -18,6 +21,7 @@ import com.yitianys.BlockZ.network.SyncBackpackS2C;
 import com.yitianys.BlockZ.util.InventoryUtils;
 import com.yitianys.BlockZ.util.ItemHandlerContainer;
 import com.yitianys.BlockZ.util.ItemSizeManager;
+import com.yitianys.BlockZ.ui.DayZUiPolicy;
 import com.yitianys.BlockZ.menu.VicinityManager;
 import net.minecraft.advancements.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
@@ -314,10 +318,6 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
     private boolean corpseStorageDirty = false;
     private int corpseStorageSlotStart = -1;
     private int corpseStorageCapacity = 0;
-    private int lastCorpseBackpackCap = 0;
-    private int lastCorpseVestCap = 0;
-    private int lastCorpseShirtCap = 0;
-    private int lastCorpsePantsCap = 0;
     private final ItemStackHandler corpseContentHandler = new ItemStackHandler(256) {
         @Override
         protected void onContentsChanged(int slot) {
@@ -426,38 +426,39 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
     public int pocketsY = UIConstants.INVENTORY_SLOTS_Y;
     public int backpackY = -1000;
     public int vestY = -1000;
-    public int shirtY = -1000;
-    public int pantsY = -1000;
 
     // 记录各分区当前使用的列数（用于 Tetris 点击/锚点计算）
-    private int backpackSectionCols = UIConstants.INVENTORY_COLS;
-    private int vestSectionCols = UIConstants.INVENTORY_COLS;
-    private int shirtSectionCols = UIConstants.INVENTORY_COLS;
-    private int pantsSectionCols = UIConstants.INVENTORY_COLS;
     
     // Corpse Storage Layout Y positions
-    public int corpseStorageY = -1000; // Deprecated/Fallback
-    public int corpseBackpackY = -1000;
-    public int corpseVestY = -1000;
-    public int corpseShirtY = -1000;
-    public int corpsePantsY = -1000;
 
     // Public capacities for Screen rendering
     public int backpackCapacity = 0;
     public int vestCapacity = 0;
-    public int shirtCapacity = 0;
-    public int pantsCapacity = 0;
 
     // Track last capacity to ensure correct offset handling during save
-    private int lastBackpackCap = 0;
-    private int lastVestCap = 0;
-    private int lastShirtCap = 0;
-    private int lastPantsCap = 0;
+    public record StorageSection(int equipmentIndex, ItemStack stack, int offset, int capacity, int columns) { }
+    private List<StorageSection> loadedStorage = List.of();
+    private List<StorageSection> loadedCorpseStorage = List.of();
+
+    public List<StorageSection> getStorageSections() {
+        List<StorageSection> result = new ArrayList<>();
+        int offset = 0;
+        for (int index : new int[]{5, 6, 8, 0, 1, 2, 3}) {
+            ItemStack stack = index == 5 ? getStorageBackpackStack() : index == 6 ? getStorageVestStack()
+                    : index == 8 ? EquipmentSlots.special(player, PlayerBackpack.SLOT_MASK) : EquipmentSlots.armor(player, index);
+            int capacity = Math.min(getStorageSlotCount(stack), getBackpackGridSlots() - offset);
+            if (capacity > 0) {
+                int columns = getCapacityColsForItem(stack, UIConstants.INVENTORY_MAX_COLS, capacity);
+                result.add(new StorageSection(index, stack, offset, capacity, columns));
+                offset += capacity;
+            }
+        }
+        return result;
+    }
+
     private final List<CuriosIntegration.CurioSlotRef> additionalEquipmentSlotRefs = new ArrayList<>();
     private final List<AdditionalEquipmentGroupLayout> additionalEquipmentGroupLayouts = new ArrayList<>();
     private final Map<String, Boolean> additionalEquipmentGroupCollapsed = new HashMap<>();
-    private ItemStack storageBackpackOverride;
-    private ItemStack storageVestOverride;
 
     private boolean isPlayerCorpseMode() {
         return this.activeContainer instanceof CorpseEntity;
@@ -471,6 +472,10 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         return isPlayerCorpseMode() || isZombieCorpseMode();
     }
     
+    public boolean isWorkbench() {
+        return this.isWorkbench;
+    }
+
     public boolean isCorpseMode() {
         return isPlayerCorpseMode();
     }
@@ -594,9 +599,10 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         return maxX + UIConstants.SLOT_SIZE + Math.max(0, padding);
     }
 
-    // 当 Vicinity 使用窄面板时，需要整体向右平移，和 PLAYER 面板贴紧
+    // Inventory 动态扩宽时把右侧 Vicinity 同步右移；窄面板在预留区域内右对齐。
     public int getVicinityOffsetX() {
-        return UIConstants.VICINITY_PANEL_W - getVicinityPanelWidth();
+        return UIConstants.inventoryExtraWidth(getInventoryMaxCols())
+                + UIConstants.VICINITY_PANEL_W - getVicinityPanelWidth();
     }
 
     private int getContainerVicinityCols() {
@@ -617,38 +623,11 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
     }
 
     private int getCorpseMaxCols() {
-        if (!isCorpseMode()) return UIConstants.INVENTORY_COLS;
         int maxCols = UIConstants.INVENTORY_COLS;
-        int limit = UIConstants.VICINITY_COLS;
-        int defaultCols = UIConstants.INVENTORY_COLS;
-
-        ItemStack cBpStack = getCorpseEquipmentStack(0);
-        ItemStack cVestStack = getCorpseEquipmentStack(1);
-        ItemStack cShirtStack = getCorpseEquipmentStack(2);
-        ItemStack cPantsStack = getCorpseEquipmentStack(3);
-
-        int bpCap = getCorpseBackpackSlots(cBpStack);
-        int vestCap = getCorpseBackpackSlots(cVestStack);
-        int shirtCap = getCorpseBackpackSlots(cShirtStack);
-        int pantsCap = getCorpseBackpackSlots(cPantsStack);
-
-        if (bpCap > 0) maxCols = Math.max(maxCols, getCorpseCapacityCols(cBpStack, bpCap, defaultCols, limit));
-        if (vestCap > 0) maxCols = Math.max(maxCols, getCorpseCapacityCols(cVestStack, vestCap, defaultCols, limit));
-        if (shirtCap > 0) maxCols = Math.max(maxCols, getCorpseCapacityCols(cShirtStack, shirtCap, defaultCols, limit));
-        if (pantsCap > 0) maxCols = Math.max(maxCols, getCorpseCapacityCols(cPantsStack, pantsCap, defaultCols, limit));
-
-        if (maxCols > limit) maxCols = limit;
-        return maxCols;
+        for (StorageSection section : getCorpseStorageSections()) maxCols = Math.max(maxCols, section.columns());
+        return Math.min(maxCols, UIConstants.VICINITY_COLS);
     }
 
-    private int getCorpseCapacityCols(ItemStack stack, int cap, int defaultCols, int limit) {
-        if (cap <= 0) return defaultCols;
-        int cols = ItemSizeManager.getCapacityCols(stack, defaultCols);
-        if (cols <= 0) cols = defaultCols;
-        if (cols > limit) cols = limit;
-        if (cols > cap) cols = cap;
-        return cols;
-    }
 
     private int clampContainerPage(int page) {
         int max = Math.max(0, getContainerPageCount() - 1);
@@ -669,9 +648,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         this.manageContainerOpenState = true;
         
         // 预先计算锁定状态
-        boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::isDayzEnabled)
-                .orElse(true);
+        boolean dayzEnabled = DayZUiPolicy.shouldUseDayZ(player);
         // 如果是尸体模式，强制解除锁定，以便玩家使用背包扩展槽位
         boolean isCorpse = isCorpseLikeEntity(entity);
         this.isLockedMode = (!dayzEnabled && !player.hasPermissions(2)) && !isCorpse;
@@ -714,9 +691,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         this.manageContainerOpenState = manageContainerOpenState;
         
         // 预先计算锁定状态
-        boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::isDayzEnabled)
-                .orElse(true);
+        boolean dayzEnabled = DayZUiPolicy.shouldUseDayZ(player);
         this.isLockedMode = !dayzEnabled && !player.hasPermissions(2);
 
         this.containerPos = pos;
@@ -940,27 +915,10 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
             this.containerPage = clampContainerPage(this.containerPage);
         }
 
-        // 1. Get Capacities
-        ItemStack backpackStack = getStorageBackpackStack();
-        ItemStack vestStack = getStorageVestStack();
-        ItemStack shirtStack = this.player.getInventory().getArmor(2);
-        ItemStack pantsStack = this.player.getInventory().getArmor(1);
+        List<StorageSection> storageSections = getStorageSections();
+        this.backpackCapacity = storageSections.stream().filter(section -> section.equipmentIndex() == 5).mapToInt(StorageSection::capacity).sum();
+        this.vestCapacity = storageSections.stream().filter(section -> section.equipmentIndex() == 6).mapToInt(StorageSection::capacity).sum();
 
-        int bpCap = getStorageSlotCount(backpackStack);
-        int vestCap = getStorageSlotCount(vestStack);
-        int shirtCap = BlockZConfigs.getBackpackSlots(shirtStack);
-        int pantsCap = BlockZConfigs.getBackpackSlots(pantsStack);
-
-        int[] safeCaps = clampBackpackCaps(bpCap, vestCap, shirtCap, pantsCap);
-        bpCap = safeCaps[0];
-        vestCap = safeCaps[1];
-        shirtCap = safeCaps[2];
-        pantsCap = safeCaps[3];
-
-        this.backpackCapacity = bpCap;
-        this.vestCapacity = vestCap;
-        this.shirtCapacity = shirtCap;
-        this.pantsCapacity = pantsCap;
 
         int startX = UIConstants.INVENTORY_SLOTS_X;
         int currentY = UIConstants.INVENTORY_SLOTS_Y;
@@ -1067,72 +1025,19 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
             }
             this.backpackY = currentY;
             this.vestY = -1000;
-            this.shirtY = -1000;
-            this.pantsY = -1000;
+
 
             int rows = (int) Math.ceil((double) lockedSlotsCount / cols);
             currentY += rows * UIConstants.SLOT_PITCH + gap;
         } else {
-            // In DayZ mode, we group by item type
-            int backpackOffset = 0;
-            int vestOffset = backpackOffset + bpCap;
-            int shirtOffset = vestOffset + vestCap;
-            int pantsOffset = shirtOffset + shirtCap;
-
-            // Position Shirt Slots
-            if (shirtCap > 0) {
-                this.shirtY = currentY;
-                int shirtCols = getCapacityColsForItem(shirtStack, sectionMaxCols, shirtCap);
-                this.shirtSectionCols = shirtCols;
-                updateGridPos(backpackStartIdx + shirtOffset, shirtCap, startX, currentY, shirtCols, shirtOffset);
-                int rows = (int) Math.ceil((double) shirtCap / shirtCols);
-                currentY += rows * UIConstants.SLOT_PITCH + gap;
-            } else {
-                this.shirtY = -1000;
-                this.shirtSectionCols = cols;
+            this.backpackY = this.vestY = -1000;
+            for (StorageSection section : storageSections) {
+                updateGridPos(backpackStartIdx + section.offset(), section.capacity(), startX, currentY, section.columns(), section.offset());
+                if (section.equipmentIndex() == 5) this.backpackY = currentY;
+                if (section.equipmentIndex() == 6) this.vestY = currentY;
+                currentY += ((section.capacity() + section.columns() - 1) / section.columns()) * UIConstants.SLOT_PITCH + gap;
             }
-
-            // Position Pants Slots
-            if (pantsCap > 0) {
-                this.pantsY = currentY;
-                int pantsCols = getCapacityColsForItem(pantsStack, sectionMaxCols, pantsCap);
-                this.pantsSectionCols = pantsCols;
-                updateGridPos(backpackStartIdx + pantsOffset, pantsCap, startX, currentY, pantsCols, pantsOffset);
-                int rows = (int) Math.ceil((double) pantsCap / pantsCols);
-                currentY += rows * UIConstants.SLOT_PITCH + gap;
-            } else {
-                this.pantsY = -1000;
-                this.pantsSectionCols = cols;
-            }
-
-            // Position Vest Slots
-            if (vestCap > 0) {
-                this.vestY = currentY;
-                int vestCols = getCapacityColsForItem(vestStack, sectionMaxCols, vestCap);
-                this.vestSectionCols = vestCols;
-                updateGridPos(backpackStartIdx + vestOffset, vestCap, startX, currentY, vestCols, vestOffset);
-                int rows = (int) Math.ceil((double) vestCap / vestCols);
-                currentY += rows * UIConstants.SLOT_PITCH + gap;
-            } else {
-                this.vestY = -1000;
-                this.vestSectionCols = cols;
-            }
-
-            // Position Backpack Slots
-            if (bpCap > 0) {
-                this.backpackY = currentY;
-                int bpCols = getCapacityColsForItem(backpackStack, sectionMaxCols, bpCap);
-                this.backpackSectionCols = bpCols;
-                updateGridPos(backpackStartIdx + backpackOffset, bpCap, startX, currentY, bpCols, backpackOffset);
-                int rows = (int) Math.ceil((double) bpCap / bpCols);
-                currentY += rows * UIConstants.SLOT_PITCH + gap;
-            } else {
-                this.backpackY = -1000;
-                this.backpackSectionCols = cols;
-            }
-
-            // Hide unused slots
-            int totalUsedCap = bpCap + vestCap + shirtCap + pantsCap;
+            int totalUsedCap = storageSections.stream().mapToInt(StorageSection::capacity).sum();
             int gridSlots = getBackpackGridSlots();
             for (int i = totalUsedCap; i < gridSlots; i++) {
                 int menuIndex = backpackStartIdx + i;
@@ -1209,121 +1114,23 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
             }
         }
 
-        // 5. Position Corpse Storage Slots (if applicable)
-        int corpseStorageSlotStart = getCorpseStorageSlotStart();
-        if (isCorpseMode() && corpseStorageSlotStart >= 0) {
-            ItemStack cBpStack = getCorpseEquipmentStack(0);
-            ItemStack cVestStack = getCorpseEquipmentStack(1);
-            ItemStack cShirtStack = getCorpseEquipmentStack(2);
-            ItemStack cPantsStack = getCorpseEquipmentStack(3);
-
-            int cBpCap = getCorpseBackpackSlots(cBpStack);
-            int cVestCap = getCorpseBackpackSlots(cVestStack);
-            int cShirtCap = getCorpseBackpackSlots(cShirtStack);
-            int cPantsCap = getCorpseBackpackSlots(cPantsStack);
-
-            int totalCap = this.corpseContentHandler.getSlots();
-            int safeBpCount = Math.min(cBpCap, totalCap);
-            int safeVestCount = Math.min(cVestCap, totalCap - safeBpCount);
-            int safeShirtCount = Math.min(cShirtCap, totalCap - safeBpCount - safeVestCount);
-            int safePantsCount = Math.min(cPantsCap, totalCap - safeBpCount - safeVestCount - safeShirtCount);
-
-            this.corpseStorageCapacity = safeBpCount + safeVestCount + safeShirtCount + safePantsCount;
-
-            if (this.corpseStorageCapacity > 0) {
-                int cCurrentY = vicinityMaxY + gap;
-                int cStartX = UIConstants.VICINITY_SLOTS_X + getVicinityOffsetX();
-
-                int vCols = getVicinityCols();
-
-                // Position Corpse Backpack Slots
-                if (safeBpCount > 0) {
-                    cCurrentY += 10;
-                    this.corpseBackpackY = cCurrentY;
-                    int bpOffset = 0;
-                    int sectionCols = getCapacityColsForItem(cBpStack, vCols, safeBpCount);
-                    updateGridPos(corpseStorageSlotStart + bpOffset, safeBpCount, cStartX, cCurrentY, sectionCols, bpOffset);
-                    {
-                        int rows = (int) Math.ceil((double) safeBpCount / sectionCols);
-                        cCurrentY += rows * UIConstants.SLOT_PITCH + 4;
-                    }
-                } else {
-                    this.corpseBackpackY = -1000;
-                }
-
-                // Position Corpse Vest Slots
-                if (safeVestCount > 0) {
-                    if (cCurrentY > vicinityMaxY + gap) cCurrentY += 2;
-                    else cCurrentY += 10;
-
-                    this.corpseVestY = cCurrentY;
-                    int vestOffset = safeBpCount;
-                    int sectionCols = getCapacityColsForItem(cVestStack, vCols, safeVestCount);
-                    updateGridPos(corpseStorageSlotStart + vestOffset, safeVestCount, cStartX, cCurrentY, sectionCols, vestOffset);
-                    int rows = (int) Math.ceil((double) safeVestCount / sectionCols);
-                    cCurrentY += rows * UIConstants.SLOT_PITCH + 4;
-                } else {
-                    this.corpseVestY = -1000;
-                }
-
-                // Position Corpse Shirt Slots
-                if (safeShirtCount > 0) {
-                    if (cCurrentY > vicinityMaxY + gap) cCurrentY += 2;
-                    else cCurrentY += 10;
-
-                    this.corpseShirtY = cCurrentY;
-                    int shirtOffset = safeBpCount + safeVestCount;
-                    int sectionCols = getCapacityColsForItem(cShirtStack, vCols, safeShirtCount);
-                    updateGridPos(corpseStorageSlotStart + shirtOffset, safeShirtCount, cStartX, cCurrentY, sectionCols, shirtOffset);
-                    int rows = (int) Math.ceil((double) safeShirtCount / sectionCols);
-                    cCurrentY += rows * UIConstants.SLOT_PITCH + 4;
-                } else {
-                    this.corpseShirtY = -1000;
-                }
-
-                // Position Corpse Pants Slots
-                if (safePantsCount > 0) {
-                    if (cCurrentY > vicinityMaxY + gap) cCurrentY += 2;
-                    else cCurrentY += 10;
-
-                    this.corpsePantsY = cCurrentY;
-                    int pantsOffset = safeBpCount + safeVestCount + safeShirtCount;
-                    int sectionCols = getCapacityColsForItem(cPantsStack, vCols, safePantsCount);
-                    updateGridPos(corpseStorageSlotStart + pantsOffset, safePantsCount, cStartX, cCurrentY, sectionCols, pantsOffset);
-                    int rows = (int) Math.ceil((double) safePantsCount / sectionCols);
-                    cCurrentY += rows * UIConstants.SLOT_PITCH + 4;
-                } else {
-                    this.corpsePantsY = -1000;
-                }
-
-                vicinityMaxY = cCurrentY;
-                this.corpseStorageY = vicinityMaxY;
-            } else {
-                this.corpseStorageY = -1000;
-                this.corpseBackpackY = -1000;
-                this.corpseVestY = -1000;
-                this.corpseShirtY = -1000;
-                this.corpsePantsY = -1000;
+        int corpseStart = getCorpseStorageSlotStart();
+        if (isPlayerCorpseMode() && corpseStart >= 0) {
+            List<StorageSection> sections = getCorpseStorageSections();
+            this.corpseStorageCapacity = sections.stream().mapToInt(StorageSection::capacity).sum();
+            int y = vicinityMaxY + gap;
+            int x = UIConstants.VICINITY_SLOTS_X + getVicinityOffsetX();
+            for (StorageSection section : sections) {
+                y += 10;
+                updateGridPos(corpseStart + section.offset(), section.capacity(), x, y, section.columns(), section.offset());
+                y += (section.capacity() + section.columns() - 1) / section.columns() * UIConstants.SLOT_PITCH + 4;
             }
-
-            // Hide overflow slots
-            for (int i = 0; i < this.corpseContentHandler.getSlots(); i++) {
-                boolean isValid = false;
-                if (i < safeBpCount) isValid = true;
-                else if (i >= safeBpCount && i < safeBpCount + safeVestCount) isValid = true;
-                else if (i >= safeBpCount + safeVestCount && i < safeBpCount + safeVestCount + safeShirtCount) isValid = true;
-                else if (i >= safeBpCount + safeVestCount + safeShirtCount && i < safeBpCount + safeVestCount + safeShirtCount + safePantsCount) isValid = true;
-
-                if (!isValid && corpseStorageSlotStart + i < this.slots.size()) {
-                    setSlotPos(this.slots.get(corpseStorageSlotStart + i), -10000, -10000);
-                }
+            if (!sections.isEmpty()) vicinityMaxY = y;
+            for (int i = corpseStorageCapacity; i < corpseContentHandler.getSlots(); i++) {
+                Slot slot = slots.get(corpseStart + i);
+                setSlotPos(slot, -10000, -10000);
+                if (slot instanceof TetrisSlot tetris) tetris.setSectionBounds(0, 0);
             }
-        } else {
-            this.corpseStorageY = -1000;
-            this.corpseBackpackY = -1000;
-            this.corpseVestY = -1000;
-            this.corpseShirtY = -1000;
-            this.corpsePantsY = -1000;
         }
 
         this.totalVicinityHeight = vicinityMaxY - UIConstants.VICINITY_SLOTS_Y;
@@ -1659,17 +1466,6 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         }
     }
 
-    private void syncCapabilityMirror(int slotId, ItemStack stack) {
-        if (this.player instanceof ServerPlayer serverPlayer) {
-            try {
-                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
-                        new SyncBackpackS2C(slotId, stack));
-            } catch (Exception e) {
-                BlockZ.LOGGER.error("Failed to sync capability mirror for slot " + slotId, e);
-            }
-        }
-    }
-
     private void addVicinitySlots(Inventory inv) {
         int addedSlots = 0;
 
@@ -1733,7 +1529,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         else if (this.activeContainer != null && this.activeContainer.getContainerSize() == 3) {
             // Compatibility for common 3-slot containers from third-party mods
             // Map to a Furnace-like layout: Input, Fuel, Output
-            int centerX = UIConstants.VICINITY_X + UIConstants.PANEL_W / 2;
+            int centerX = UIConstants.VICINITY_X + getVicinityOffsetX() + getVicinityPanelWidth() / 2;
             int startY = UIConstants.VICINITY_SLOTS_Y + 20;
 
             // Slot 0: Input
@@ -1850,17 +1646,27 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
 
             @Override
             public boolean mayPlace(ItemStack stack) {
-                if (stack.isEmpty()) return false;
+                if (stack.isEmpty() || stack.getItem() instanceof ClothingItem) return false;
+                if (isPlayerCorpseMode()) {
+                    return switch (containerIndex) {
+                        case 0 -> EquipmentRules.acceptsSpecial(player, PlayerBackpack.SLOT_BACKPACK, stack);
+                        case 1 -> EquipmentRules.acceptsSpecial(player, PlayerBackpack.SLOT_VEST, stack);
+                        case 2, 3, 4, 5 -> EquipmentRules.acceptsArmor(player, stack);
+                        case 6 -> true;
+                        case 7 -> EquipmentRules.acceptsSpecial(player, PlayerBackpack.SLOT_MASK, stack);
+                        default -> false;
+                    };
+                }
                 return switch (containerIndex) {
-                    case 0 -> isBackpackItemValid(stack) || (stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.BACKPACK);
-                    case 1 -> stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.VEST;
-                    case 2 -> canEquip(stack, EquipmentSlot.CHEST) || (stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.SHIRT);
-                    case 3 -> canEquip(stack, EquipmentSlot.LEGS) || (stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.PANTS);
-                    case 4 -> canEquip(stack, EquipmentSlot.HEAD) || (stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.HAT);
-                    case 5 -> canEquip(stack, EquipmentSlot.FEET) || (stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.SHOES);
+                    case 0 -> isBackpackItemValid(stack);
+                    case 1 -> false;
+                    case 2 -> canEquip(stack, EquipmentSlot.CHEST);
+                    case 3 -> canEquip(stack, EquipmentSlot.LEGS);
+                    case 4 -> canEquip(stack, EquipmentSlot.HEAD);
+                    case 5 -> canEquip(stack, EquipmentSlot.FEET);
                     case 6 -> stack.getMaxStackSize() == 1;
-                    case 7 -> stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.MASK;
-                    case 8 -> stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.GLOVES;
+                    case 7 -> false;
+                    case 8 -> false;
                     default -> false;
                 };
             }
@@ -1872,7 +1678,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
 
             @Override
             public void onTake(Player player, ItemStack stack) {
-                boolean updatesStorage = containerIndex <= 3;
+                boolean updatesStorage = isPlayerCorpseMode() && containerIndex <= 5;
                 if (updatesStorage && !player.level().isClientSide) {
                     saveCorpseStorageToItems();
                 }
@@ -1886,7 +1692,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
 
             @Override
             public void set(ItemStack stack) {
-                boolean updatesStorage = containerIndex <= 3;
+                boolean updatesStorage = isPlayerCorpseMode() && containerIndex <= 5;
                 if (updatesStorage && !isCorpseLoading && this.hasItem() && !player.level().isClientSide) {
                     saveCorpseStorageToItems();
                 }
@@ -1916,221 +1722,45 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
     }
 
     private void addEquipmentSlots(Inventory inv) {
-        // 30: Headgear (Vanilla Helmet + Custom Hat)
-        this.addSlot(new Slot(inv, 39, UIConstants.SLOT_HEADGEAR_X, UIConstants.SLOT_HEADGEAR_Y) {
-            @Override 
-            public boolean mayPlace(ItemStack stack) {
-                if (canEquip(stack, EquipmentSlot.HEAD)) return true;
-                return stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.HAT;
-            }
-            @Override public int getMaxStackSize() { return 1; }
-        });
-
-        // 31: Shirt (Vanilla Chestplate + Custom Shirt)
-        this.addSlot(new Slot(inv, 38, UIConstants.SLOT_SHIRT_X, UIConstants.SLOT_SHIRT_Y) {
-            @Override 
-            public boolean mayPlace(ItemStack stack) {
-                if (canEquip(stack, EquipmentSlot.CHEST)) return true;
-                return stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.SHIRT;
-            }
-            @Override public int getMaxStackSize() { return 1; }
-            @Override
-            public void onTake(Player player, ItemStack stack) {
-                if (!player.level().isClientSide && !suppressDrop) {
-                     dropShirtItems(player, stack);
+        IItemHandler armorHandler = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
+                .map(PlayerBackpack::getArmorInventory).orElse(new ItemStackHandler(4));
+        for (int i = 0; i < 4; i++) {
+            final int armorIndex = i;
+            this.addSlot(new SlotItemHandler(armorHandler, i, UIConstants.SLOT_SHIRT_X + i * 18, UIConstants.SLOT_SHIRT_Y) {
+                @Override public int getMaxStackSize() { return 1; }
+                @Override public boolean isActive() { return armorIndex < EquipmentSlots.visibleArmorSlots(player); }
+                @Override public boolean mayPlace(ItemStack stack) {
+                    return armorIndex < EquipmentSlots.unlocked(player) && EquipmentRules.acceptsArmor(player, stack);
                 }
-                super.onTake(player, stack);
-                saveBackpackToItem(); // Save before clearing
-                loadBackpackFromItem();
-                updateSlotPositions();
-                broadcastChanges();
-            }
-            @Override
-            public void set(ItemStack stack) {
-                if (!isLoading) {
-                    if (this.hasItem() && !player.level().isClientSide) {
-                        ItemStack current = this.getItem();
-                        dropShirtItems(player, current);
-                    }
-                    saveBackpackToItem(); // Saves empty to Old Shirt (clears NBT)
+                @Override public boolean mayPickup(Player player) {
+                    return player.isCreative() || !EnchantmentHelper.hasBindingCurse(getItem());
                 }
-                super.set(stack);
-                if (!isLoading) {
-                    loadBackpackFromItem();
-                    suppressDrop = true; // Prevent onTake from dropping/stripping again
-                    updateSlotPositions();
-                    broadcastChanges();
+                @Override public void set(ItemStack stack) {
+                    saveBackpackToItem();
+                    super.set(stack);
+                    if (!isLoading) { loadBackpackFromItem(); updateSlotPositions(); }
                 }
-            }
-        });
-
-        // 32: Pants (Vanilla Leggings + Custom Pants)
-        this.addSlot(new Slot(inv, 37, UIConstants.SLOT_PANTS_X, UIConstants.SLOT_PANTS_Y) {
-            @Override 
-            public boolean mayPlace(ItemStack stack) {
-                if (canEquip(stack, EquipmentSlot.LEGS)) return true;
-                return stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.PANTS;
-            }
-            @Override public int getMaxStackSize() { return 1; }
-            @Override
-            public void onTake(Player player, ItemStack stack) {
-                if (!player.level().isClientSide && !suppressDrop) {
-                     dropPantsItems(player, stack);
-                }
-                super.onTake(player, stack);
-                saveBackpackToItem(); // Save before clearing
-                loadBackpackFromItem();
-                updateSlotPositions();
-                broadcastChanges();
-            }
-            @Override
-            public void set(ItemStack stack) {
-                if (!isLoading) {
-                    if (this.hasItem() && !player.level().isClientSide) {
-                        ItemStack current = this.getItem();
-                        dropPantsItems(player, current);
-                    }
-                    saveBackpackToItem(); // Saves empty to Old Pants (clears NBT)
-                }
-                super.set(stack);
-                if (!isLoading) {
-                    loadBackpackFromItem();
-                    suppressDrop = true; // Prevent onTake from dropping/stripping again
-                    updateSlotPositions();
-                    broadcastChanges();
-                }
-            }
-        });
-
-        // 33: Shoes (Vanilla Boots + Custom Shoes)
-        this.addSlot(new Slot(inv, 36, UIConstants.SLOT_SHOES_X, UIConstants.SLOT_SHOES_Y) {
-            @Override 
-            public boolean mayPlace(ItemStack stack) {
-                if (canEquip(stack, EquipmentSlot.FEET)) return true;
-                return stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.SHOES;
-            }
-            @Override public int getMaxStackSize() { return 1; }
-        });
+            });
+        }
 
         // 34: Offhand
         this.addSlot(new Slot(inv, 40, UIConstants.OFFHAND_X, UIConstants.OFFHAND_Y));
 
         // Capability Slots (必须始终添加，否则索引会偏移导致崩溃)
-        IItemHandler capHandler = this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::getInventory)
-                .orElse(new ItemStackHandler(PlayerBackpack.SLOT_COUNT));
+        IItemHandler capHandler = new SpecialEquipmentHandler(player);
 
-        // 35: Backpack
-        this.addSlot(new SlotItemHandler(capHandler, PlayerBackpack.SLOT_BACKPACK, UIConstants.BACKPACK_EQUIP_X, UIConstants.BACKPACK_EQUIP_Y) {
-            @Override
-            public boolean mayPlace(ItemStack stack) {
-                return stack.getItem() instanceof BackpackItem
-                        || stack.is(BACKPACKS)
-                        || CuriosIntegration.supportsSlot(player, stack, CuriosIntegration.SLOT_BACK);
-            }
-            @Override public int getMaxStackSize() { return 1; }
-            @Override
-            public void set(ItemStack stack) {
-                if (!isLoading) saveBackpackToItem();
-                super.set(stack);
-                if (!isLoading) {
-                    syncSlot(PlayerBackpack.SLOT_BACKPACK, stack);
-                    refreshStorageLayout(stack, null);
-                    broadcastChanges();
+        for (int special : new int[]{PlayerBackpack.SLOT_BACKPACK, PlayerBackpack.SLOT_VEST, PlayerBackpack.SLOT_GLOVES, PlayerBackpack.SLOT_MASK}) {
+            this.addSlot(new SlotItemHandler(capHandler, special, UIConstants.BACKPACK_EQUIP_X, UIConstants.BACKPACK_EQUIP_Y) {
+                @Override public int getMaxStackSize() { return 1; }
+                @Override public boolean mayPlace(ItemStack stack) { return EquipmentRules.acceptsSpecial(player, special, stack); }
+                @Override public boolean mayPickup(Player player) { return player.isCreative() || !EnchantmentHelper.hasBindingCurse(getItem()); }
+                @Override public void set(ItemStack stack) {
+                    saveBackpackToItem();
+                    super.set(stack);
+                    if (!isLoading) { loadBackpackFromItem(); updateSlotPositions(); }
                 }
-            }
-            @Override
-            public void onTake(Player player, ItemStack stack) {
-                saveBackpackToItem(stack, ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY);
-                super.onTake(player, stack);
-                syncSlot(PlayerBackpack.SLOT_BACKPACK, ItemStack.EMPTY);
-                refreshStorageLayout(ItemStack.EMPTY, null);
-                broadcastChanges();
-            }
-            @Override
-            public void setChanged() {
-                super.setChanged();
-                syncSlot(PlayerBackpack.SLOT_BACKPACK, this.getItem());
-            }
-        });
-
-        // 36: Vest
-        this.addSlot(new SlotItemHandler(capHandler, PlayerBackpack.SLOT_VEST, UIConstants.SLOT_VEST_X, UIConstants.SLOT_VEST_Y) {
-            @Override public int getMaxStackSize() { return 1; }
-            @Override
-            public boolean mayPlace(ItemStack stack) {
-                if (stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.VEST) {
-                    return true;
-                }
-                return CuriosIntegration.supportsSlot(player, stack, CuriosIntegration.SLOT_BODY);
-            }
-            @Override
-            public void set(ItemStack stack) {
-                if (!isLoading) saveBackpackToItem();
-                super.set(stack);
-                if (!isLoading) {
-                    syncSlot(PlayerBackpack.SLOT_VEST, stack);
-                    refreshStorageLayout(null, stack);
-                    broadcastChanges();
-                }
-            }
-            @Override
-            public void onTake(Player player, ItemStack stack) {
-                saveBackpackToItem(ItemStack.EMPTY, stack, ItemStack.EMPTY, ItemStack.EMPTY);
-                super.onTake(player, stack);
-                syncSlot(PlayerBackpack.SLOT_VEST, ItemStack.EMPTY);
-                refreshStorageLayout(null, ItemStack.EMPTY);
-                broadcastChanges();
-            }
-            @Override
-            public void setChanged() {
-                super.setChanged();
-                syncSlot(PlayerBackpack.SLOT_VEST, this.getItem());
-            }
-        });
-
-        // 37: Gloves
-        this.addSlot(new SlotItemHandler(capHandler, PlayerBackpack.SLOT_GLOVES, UIConstants.SLOT_GLOVES_X, UIConstants.SLOT_GLOVES_Y) {
-            @Override public int getMaxStackSize() { return 1; }
-            @Override
-            public boolean mayPlace(ItemStack stack) {
-                return stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.GLOVES;
-            }
-            @Override
-            public void set(ItemStack stack) {
-                super.set(stack);
-                syncSlot(PlayerBackpack.SLOT_GLOVES, stack);
-            }
-            @Override
-            public void setChanged() {
-                super.setChanged();
-                syncSlot(PlayerBackpack.SLOT_GLOVES, this.getItem());
-            }
-        });
-
-        // 38: Mask (Also allows Hats)
-        this.addSlot(new SlotItemHandler(capHandler, PlayerBackpack.SLOT_MASK, UIConstants.SLOT_MASK_X, UIConstants.SLOT_MASK_Y) {
-            @Override public int getMaxStackSize() { return 1; }
-            @Override
-            public boolean mayPlace(ItemStack stack) {
-                if (canEquip(stack, EquipmentSlot.HEAD)) return true;
-                if (CuriosIntegration.supportsSlot(player, stack, CuriosIntegration.SLOT_HEAD)) {
-                    return true;
-                }
-                if (!(stack.getItem() instanceof ClothingItem c)) return false;
-                return c.getType() == ClothingItem.ClothingType.MASK || c.getType() == ClothingItem.ClothingType.HAT;
-            }
-            @Override
-            public void set(ItemStack stack) {
-                super.set(stack);
-                syncSlot(PlayerBackpack.SLOT_MASK, stack);
-            }
-            @Override
-            public void setChanged() {
-                super.setChanged();
-                syncSlot(PlayerBackpack.SLOT_MASK, this.getItem());
-            }
-        });
+            });
+        }
 
         List<CuriosIntegration.CurioSlotRef> requestedExtraSlots = this.player.level().isClientSide
                 ? consumePendingClientAdditionalEquipmentSlots()
@@ -2159,38 +1789,6 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
             });
         }
         rebuildAdditionalEquipmentGroupLayouts();
-    }
-
-    private void syncSlot(int slotId, ItemStack stack) {
-        if (this.player instanceof ServerPlayer serverPlayer) {
-            try {
-                ItemStack clientMirror = getCapabilityMirrorStack(slotId, stack);
-                CuriosIntegration.syncFromCapability(serverPlayer, slotId, stack);
-                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> serverPlayer), 
-                    new SyncBackpackS2C(slotId, clientMirror));
-            } catch (Exception e) {
-                BlockZ.LOGGER.error("Failed to sync slot " + slotId, e);
-            }
-        }
-    }
-
-    private ItemStack getCapabilityMirrorStack(int slotId, ItemStack stack) {
-        if (stack.isEmpty() || !CuriosIntegration.isLoaded()) {
-            return stack;
-        }
-
-        return switch (slotId) {
-            case PlayerBackpack.SLOT_BACKPACK -> !CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_BACK).isEmpty()
-                    ? CuriosIntegration.createMirrorStack(stack)
-                    : stack;
-            case PlayerBackpack.SLOT_VEST -> !CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_BODY).isEmpty()
-                    ? CuriosIntegration.createMirrorStack(stack)
-                    : stack;
-            case PlayerBackpack.SLOT_MASK -> !CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_HEAD).isEmpty()
-                    ? CuriosIntegration.createMirrorStack(stack)
-                    : stack;
-            default -> stack;
-        };
     }
 
     public net.minecraft.world.Container getActiveContainer() {
@@ -2237,56 +1835,18 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
     }
 
     public boolean hasBackpack() {
-        boolean hasBackpackOrVest = this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(cap -> !cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_BACKPACK).isEmpty() || !cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST).isEmpty())
-                .orElse(false);
-        if (hasBackpackOrVest) return true;
-
-        // Check Shirt and Pants
-        ItemStack shirt = this.player.getInventory().getArmor(2);
-        if (BlockZConfigs.getBackpackSlots(shirt) > 0) return true;
-
-        ItemStack pants = this.player.getInventory().getArmor(1);
-        if (BlockZConfigs.getBackpackSlots(pants) > 0) return true;
-
-        return false;
+        return !getStorageSections().isEmpty();
     }
 
     /**
      * 获取当前装备背包和背心提供的额外格子数
      */
     public int getBackpackCapacity() {
-        int bpCap = 0;
-        int vestCap = 0;
-        if (this.player != null) {
-            bpCap = getStorageSlotCount(getStorageBackpackStack());
-            vestCap = getStorageSlotCount(getStorageVestStack());
-        }
-
-        ItemStack shirt = this.player.getInventory().getArmor(2);
-        ItemStack pants = this.player.getInventory().getArmor(1);
-        int shirtCap = BlockZConfigs.getBackpackSlots(shirt);
-        int pantsCap = BlockZConfigs.getBackpackSlots(pants);
-
-        int[] safeCaps = clampBackpackCaps(bpCap, vestCap, shirtCap, pantsCap);
-        return safeCaps[0] + safeCaps[1] + safeCaps[2] + safeCaps[3];
+        return getStorageSections().stream().mapToInt(StorageSection::capacity).sum();
     }
 
     private int getBackpackGridSlots() {
         return this.backpackContentHandler.getSlots();
-    }
-
-    private int[] clampBackpackCaps(int bpCap, int vestCap, int shirtCap, int pantsCap) {
-        int maxSlots = getBackpackGridSlots();
-        int remaining = maxSlots;
-        int safeBp = Math.min(bpCap, remaining);
-        remaining -= safeBp;
-        int safeVest = Math.min(vestCap, remaining);
-        remaining -= safeVest;
-        int safeShirt = Math.min(shirtCap, remaining);
-        remaining -= safeShirt;
-        int safePants = Math.min(pantsCap, remaining);
-        return new int[]{safeBp, safeVest, safeShirt, safePants};
     }
 
     /**
@@ -2400,30 +1960,10 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
     }
 
     private int[] getSectionBoundsForHandlerIndex(int handlerIndex) {
-        ItemStack backpackStack = getStorageBackpackStack();
-        ItemStack vestStack = getStorageVestStack();
-        ItemStack shirtStack = this.player.getInventory().getArmor(2);
-        ItemStack pantsStack = this.player.getInventory().getArmor(1);
-
-        int bpCap = getStorageSlotCount(backpackStack);
-        int vestCap = getStorageSlotCount(vestStack);
-        int shirtCap = BlockZConfigs.getBackpackSlots(shirtStack);
-        int pantsCap = BlockZConfigs.getBackpackSlots(pantsStack);
-        int[] safeCaps = clampBackpackCaps(bpCap, vestCap, shirtCap, pantsCap);
-        bpCap = safeCaps[0];
-        vestCap = safeCaps[1];
-        shirtCap = safeCaps[2];
-        pantsCap = safeCaps[3];
-
-        int backpackOffset = 0;
-        int vestOffset = backpackOffset + bpCap;
-        int shirtOffset = vestOffset + vestCap;
-        int pantsOffset = shirtOffset + shirtCap;
-
-        if (handlerIndex >= pantsOffset && handlerIndex < pantsOffset + pantsCap) return new int[]{pantsOffset, pantsCap};
-        if (handlerIndex >= shirtOffset && handlerIndex < shirtOffset + shirtCap) return new int[]{shirtOffset, shirtCap};
-        if (handlerIndex >= vestOffset && handlerIndex < vestOffset + vestCap) return new int[]{vestOffset, vestCap};
-        if (handlerIndex >= backpackOffset && handlerIndex < backpackOffset + bpCap) return new int[]{backpackOffset, bpCap};
+        for (StorageSection section : getStorageSections()) {
+            if (handlerIndex >= section.offset() && handlerIndex < section.offset() + section.capacity())
+                return new int[]{section.offset(), section.capacity()};
+        }
         return new int[]{0, 0};
     }
 
@@ -2476,22 +2016,16 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         if (stack.isEmpty()) {
             return -1;
         }
-        int handlerIndex = hoveredSlotIndex - getBackpackSlotStart();
-        if (hoveredSlotIndex >= getCorpseStorageSlotStart() && hoveredSlotIndex <= getCorpseStorageSlotEnd()) {
-            handlerIndex = hoveredSlotIndex - getCorpseStorageSlotStart();
-        }
-
-        int[] bounds = getSectionBoundsForHandlerIndex(handlerIndex);
-        int sectionStart = bounds[0];
-        int sectionSize = bounds[1];
-        if (sectionSize <= 0) {
-            return -1;
-        }
-
-        int cols = getSectionColsForHandlerIndex(handlerIndex);
-        if (cols <= 0) {
-            return -1;
-        }
+        boolean corpseSlot = getCorpseStorageSlotStart() >= 0 && hoveredSlotIndex >= getCorpseStorageSlotStart()
+                && hoveredSlotIndex <= getCorpseStorageSlotEnd();
+        int handlerIndex = hoveredSlotIndex - (corpseSlot ? getCorpseStorageSlotStart() : getBackpackSlotStart());
+        List<StorageSection> sections = corpseSlot ? getCorpseStorageSections() : getStorageSections();
+        StorageSection section = sections.stream().filter(candidate -> handlerIndex >= candidate.offset()
+                && handlerIndex < candidate.offset() + candidate.capacity()).findFirst().orElse(null);
+        if (section == null) return -1;
+        int sectionStart = section.offset();
+        int sectionSize = section.capacity();
+        int cols = section.columns();
 
         ItemSizeManager.ItemSize size = ItemSizeManager.getSize(stack);
         int relClicked = handlerIndex - sectionStart;
@@ -2818,39 +2352,15 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
     }
 
     private int getSectionColsForHandlerIndex(int handlerIndex) {
-        // 按当前可用容量分段判断所属分区（与 updateSlotPositions 的 offset 划分保持一致）
-        ItemStack backpackStack = getStorageBackpackStack();
-        ItemStack vestStack = getStorageVestStack();
-        ItemStack shirtStack = this.player.getInventory().getArmor(2);
-        ItemStack pantsStack = this.player.getInventory().getArmor(1);
-
-        int bpCap = getStorageSlotCount(backpackStack);
-        int vestCap = getStorageSlotCount(vestStack);
-        int shirtCap = BlockZConfigs.getBackpackSlots(shirtStack);
-        int pantsCap = BlockZConfigs.getBackpackSlots(pantsStack);
-        int[] safeCaps = clampBackpackCaps(bpCap, vestCap, shirtCap, pantsCap);
-        bpCap = safeCaps[0];
-        vestCap = safeCaps[1];
-        shirtCap = safeCaps[2];
-        pantsCap = safeCaps[3];
-
-        int backpackOffset = 0;
-        int vestOffset = backpackOffset + bpCap;
-        int shirtOffset = vestOffset + vestCap;
-        int pantsOffset = shirtOffset + shirtCap;
-
-        if (handlerIndex >= pantsOffset && handlerIndex < pantsOffset + pantsCap) return this.pantsSectionCols;
-        if (handlerIndex >= shirtOffset && handlerIndex < shirtOffset + shirtCap) return this.shirtSectionCols;
-        if (handlerIndex >= vestOffset && handlerIndex < vestOffset + vestCap) return this.vestSectionCols;
-        if (handlerIndex >= backpackOffset && handlerIndex < backpackOffset + bpCap) return this.backpackSectionCols;
-
-        // fallback
+        for (StorageSection section : getStorageSections()) {
+            if (handlerIndex >= section.offset() && handlerIndex < section.offset() + section.capacity()) return section.columns();
+        }
         return UIConstants.INVENTORY_COLS;
     }
 
     public int getPocketCount() {
-        if (syncedPocketCount != -1) return syncedPocketCount;
-        return BlockZConfigs.getInitialPocketSlots();
+        if (syncedPocketCount == -1) syncedPocketCount = BlockZConfigs.getInitialPocketSlots();
+        return syncedPocketCount;
     }
 
     public int getBackpackSlotStart() {
@@ -2952,10 +2462,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
             max = Math.max(max, Math.min(UIConstants.INVENTORY_MAX_COLS, pocketCount));
         }
 
-        max = Math.max(max, this.backpackSectionCols);
-        max = Math.max(max, this.vestSectionCols);
-        max = Math.max(max, this.shirtSectionCols);
-        max = Math.max(max, this.pantsSectionCols);
+        for (StorageSection section : getStorageSections()) max = Math.max(max, section.columns());
         
         return Math.min(UIConstants.INVENTORY_MAX_COLS, max);
     }
@@ -3320,6 +2827,13 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
     public void broadcastChanges() {
         // 只有在服务端才执行更新
         if (this.player instanceof ServerPlayer) {
+            List<StorageSection> currentStorage = getStorageSections();
+            boolean changed = currentStorage.size() != loadedStorage.size();
+            for (int i = 0; !changed && i < currentStorage.size(); i++) {
+                StorageSection before = loadedStorage.get(i), after = currentStorage.get(i);
+                changed = before.stack() != after.stack() || before.capacity() != after.capacity() || before.columns() != after.columns();
+            }
+            if (changed) { saveBackpackToItem(); loadBackpackFromItem(); updateSlotPositions(); }
             if (++tickCount % 10 == 0 || isVicinityDirty || corpseStorageDirty) { // 每 10 tick (0.5秒) 更新一次附近物品，或者被标记为 dirty
                 updateVicinityItems(this.player);
                 isVicinityDirty = false;
@@ -3429,55 +2943,6 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         return (hasBlockZStorage(stack) || getModernMayhemInventorySize(stack) > 0) && hasAnyStorageContents(stack);
     }
 
-    private void dropClothingItems(Player player, ItemStack clothingStack, int startOffset, int cap) {
-        if (cap <= 0) return;
-        boolean droppedFromHandler = false;
-        for (int i = 0; i < cap; i++) {
-            int idx = startOffset + i;
-            if (idx < this.backpackContentHandler.getSlots()) {
-                ItemStack stack = this.backpackContentHandler.getStackInSlot(idx);
-                if (!stack.isEmpty()) {
-                    player.drop(stack, true);
-                    this.backpackContentHandler.setStackInSlot(idx, ItemStack.EMPTY);
-                    droppedFromHandler = true;
-                }
-            }
-        }
-        if (!droppedFromHandler && !clothingStack.isEmpty() && clothingStack.hasTag()) {
-            net.minecraft.nbt.CompoundTag tag = clothingStack.getTag();
-            if (tag != null && tag.contains("Inventory")) {
-                ItemStackHandler handler = new ItemStackHandler(cap);
-                handler.deserializeNBT(tag.getCompound("Inventory"));
-                for (int i = 0; i < cap; i++) {
-                    ItemStack stack = handler.getStackInSlot(i);
-                    if (!stack.isEmpty()) {
-                        player.drop(stack, true);
-                    }
-                }
-            }
-        }
-        if (!clothingStack.isEmpty()) {
-            net.minecraft.nbt.CompoundTag tag = clothingStack.getTag();
-            if (tag != null) {
-                tag.remove("Inventory");
-            }
-        }
-    }
-
-    private void dropShirtItems(Player player, ItemStack shirtStack) {
-        int cap = Math.max(this.lastShirtCap, BlockZConfigs.getBackpackSlots(shirtStack));
-        if (cap <= 0) return;
-        int startOffset = this.lastBackpackCap + this.lastVestCap;
-        dropClothingItems(player, shirtStack, startOffset, cap);
-    }
-
-    private void dropPantsItems(Player player, ItemStack pantsStack) {
-        int cap = Math.max(this.lastPantsCap, BlockZConfigs.getBackpackSlots(pantsStack));
-        if (cap <= 0) return;
-        int startOffset = this.lastBackpackCap + this.lastVestCap + this.lastShirtCap;
-        dropClothingItems(player, pantsStack, startOffset, cap);
-    }
-
     private void addMainInventorySlots(Inventory inv) {
         int pocketCount = getPocketCount();
         int totalSlots = pocketCount + getBackpackGridSlots();
@@ -3555,171 +3020,23 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         }
     }
 
+    public void flushEquipmentStorage() { saveBackpackToItem(); }
+
     private void saveBackpackToItem() {
-        saveBackpackToItem(ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY);
-    }
-
-    private void saveBackpackToItem(ItemStack overrideBackpack, ItemStack overrideVest, ItemStack overrideShirt, ItemStack overridePants) {
-        if (this.player == null) return;
-        
-        this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-            ItemStack backpackStack = !overrideBackpack.isEmpty() ? overrideBackpack : getStorageBackpackStack();
-            ItemStack vestStack = !overrideVest.isEmpty() ? overrideVest : getStorageVestStack();
-            
-            ItemStack shirtStack = !overrideShirt.isEmpty() ? overrideShirt : this.player.getInventory().getArmor(2);
-            ItemStack pantsStack = !overridePants.isEmpty() ? overridePants : this.player.getInventory().getArmor(1);
-            
-            // Use LAST known capacities to determine offsets, NOT current item capacities
-            // This ensures we map the correct handler slots to the correct items, even if an item was removed
-            int currentOffset = 0;
-            
-            // 1. Backpack
-            if (lastBackpackCap > 0) {
-                if (!backpackStack.isEmpty()) {
-                    saveSectionToItem(backpackStack, currentOffset, lastBackpackCap);
-
-                    // Only sync if it's the capability item (not override)
-                    if (overrideBackpack.isEmpty()) {
-                        ItemStack clientMirror = getCapabilityMirrorStack(PlayerBackpack.SLOT_BACKPACK, backpackStack);
-                        cap.getInventory().setStackInSlot(PlayerBackpack.SLOT_BACKPACK, backpackStack.copy());
-                        syncCapabilityMirror(PlayerBackpack.SLOT_BACKPACK, clientMirror);
-                    }
-                }
-                currentOffset += lastBackpackCap;
-            }
-            
-            // 2. Vest
-            if (lastVestCap > 0) {
-                if (!vestStack.isEmpty()) {
-                    saveSectionToItem(vestStack, currentOffset, lastVestCap);
-
-                    if (overrideVest.isEmpty()) {
-                        ItemStack clientMirror = getCapabilityMirrorStack(PlayerBackpack.SLOT_VEST, vestStack);
-                        cap.getInventory().setStackInSlot(PlayerBackpack.SLOT_VEST, vestStack.copy());
-                        syncCapabilityMirror(PlayerBackpack.SLOT_VEST, clientMirror);
-                    }
-                }
-                currentOffset += lastVestCap;
-            }
-
-            // 3. Shirt
-            if (lastShirtCap > 0) {
-                if (!shirtStack.isEmpty()) {
-                    ItemStackHandler shirtHandler = new ItemStackHandler(lastShirtCap);
-                    boolean hasItems = false;
-                    for (int i = 0; i < lastShirtCap; i++) {
-                        if (currentOffset + i < this.backpackContentHandler.getSlots()) {
-                            ItemStack s = this.backpackContentHandler.getStackInSlot(currentOffset + i);
-                            shirtHandler.setStackInSlot(i, s);
-                            if (!s.isEmpty()) hasItems = true;
-                        }
-                    }
-                    
-                    if (hasItems) {
-                        shirtStack.getOrCreateTag().put("Inventory", shirtHandler.serializeNBT());
-                    } else {
-                        net.minecraft.nbt.CompoundTag tag = shirtStack.getTag();
-                        if (tag != null) {
-                            tag.remove("Inventory");
-                        }
-                    }
-                }
-                currentOffset += lastShirtCap;
-            }
-
-            // 4. Pants
-            if (lastPantsCap > 0) {
-                if (!pantsStack.isEmpty()) {
-                    ItemStackHandler pantsHandler = new ItemStackHandler(lastPantsCap);
-                    boolean hasItems = false;
-                    for (int i = 0; i < lastPantsCap; i++) {
-                        if (currentOffset + i < this.backpackContentHandler.getSlots()) {
-                            ItemStack s = this.backpackContentHandler.getStackInSlot(currentOffset + i);
-                            pantsHandler.setStackInSlot(i, s);
-                            if (!s.isEmpty()) hasItems = true;
-                        }
-                    }
-                    
-                    if (hasItems) {
-                        pantsStack.getOrCreateTag().put("Inventory", pantsHandler.serializeNBT());
-                    } else {
-                        net.minecraft.nbt.CompoundTag tag = pantsStack.getTag();
-                        if (tag != null) {
-                            tag.remove("Inventory");
-                        }
-                    }
-                }
-                currentOffset += lastPantsCap;
-            }
-        });
+        if (player == null || player.level().isClientSide || isLoading) return;
+        for (StorageSection section : loadedStorage) saveSectionToItem(section.stack(), section.offset(), section.capacity(), backpackContentHandler);
     }
 
     private void loadBackpackFromItem() {
-        if (this.player == null) return;
-        this.isLoading = true;
-        this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-            ItemStack backpackStack = getStorageBackpackStack();
-            ItemStack vestStack = getStorageVestStack();
-            
-            ItemStack shirtStack = this.player.getInventory().getArmor(2);
-            ItemStack pantsStack = this.player.getInventory().getArmor(1);
-            
-            int bpCap = getStorageSlotCount(backpackStack);
-            int vestCap = getStorageSlotCount(vestStack);
-            int shirtCap = BlockZConfigs.getBackpackSlots(shirtStack);
-            int pantsCap = BlockZConfigs.getBackpackSlots(pantsStack);
-
-            int[] safeCaps = clampBackpackCaps(bpCap, vestCap, shirtCap, pantsCap);
-            bpCap = safeCaps[0];
-            vestCap = safeCaps[1];
-            shirtCap = safeCaps[2];
-            pantsCap = safeCaps[3];
-
-            this.lastBackpackCap = bpCap;
-            this.lastVestCap = vestCap;
-            this.lastShirtCap = shirtCap;
-            this.lastPantsCap = pantsCap;
-            
+        if (player == null) return;
+        isLoading = true;
+        try {
+            loadedStorage = getStorageSections();
             clearBackpackHandler();
-            
-            int currentOffset = 0;
-            
-            // 从背包加载
-            if (bpCap > 0) {
-                loadSectionFromItem(backpackStack, currentOffset, bpCap);
-            }
-            currentOffset += bpCap;
-            
-            // 从背心加载
-            if (vestCap > 0) {
-                loadSectionFromItem(vestStack, currentOffset, vestCap);
-            }
-            currentOffset += vestCap;
-
-            // 从上衣加载
-            if (shirtCap > 0 && shirtStack.hasTag() && shirtStack.getTag().contains("Inventory")) {
-                ItemStackHandler shirtHandler = new ItemStackHandler(shirtCap);
-                shirtHandler.deserializeNBT(shirtStack.getTag().getCompound("Inventory"));
-                for (int i = 0; i < Math.min(shirtCap, shirtHandler.getSlots()); i++) {
-                    if (currentOffset + i < this.backpackContentHandler.getSlots()) {
-                        this.backpackContentHandler.setStackInSlot(currentOffset + i, shirtHandler.getStackInSlot(i));
-                    }
-                }
-            }
-            currentOffset += shirtCap;
-
-            // 从裤子加载
-            if (pantsCap > 0 && pantsStack.hasTag() && pantsStack.getTag().contains("Inventory")) {
-                ItemStackHandler pantsHandler = new ItemStackHandler(pantsCap);
-                pantsHandler.deserializeNBT(pantsStack.getTag().getCompound("Inventory"));
-                for (int i = 0; i < Math.min(pantsCap, pantsHandler.getSlots()); i++) {
-                    if (currentOffset + i < this.backpackContentHandler.getSlots()) {
-                        this.backpackContentHandler.setStackInSlot(currentOffset + i, pantsHandler.getStackInSlot(i));
-                    }
-                }
-            }
-        });
-        this.isLoading = false;
+            for (StorageSection section : loadedStorage) loadSectionFromItem(section.stack(), section.offset(), section.capacity(), backpackContentHandler);
+        } finally {
+            isLoading = false;
+        }
     }
 
     @Override
@@ -3738,77 +3055,46 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         }
     }
 
-    private void refreshStorageLayout(ItemStack backpackOverride, ItemStack vestOverride) {
-        this.storageBackpackOverride = backpackOverride;
-        this.storageVestOverride = vestOverride;
-        try {
-            loadBackpackFromItem();
-            updateSlotPositions();
-        } finally {
-            this.storageBackpackOverride = null;
-            this.storageVestOverride = null;
-        }
-    }
-
     private ItemStack getStorageBackpackStack() {
-        if (this.storageBackpackOverride != null) {
-            return this.storageBackpackOverride;
-        }
-        if (CuriosIntegration.isLoaded()) {
-            ItemStack curiosStack = CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_BACK);
-            if (!curiosStack.isEmpty()) {
-                return curiosStack;
-            }
-        }
-        return this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_BACKPACK))
-                .orElse(ItemStack.EMPTY);
+        return EquipmentSlots.special(player, PlayerBackpack.SLOT_BACKPACK);
     }
 
     private ItemStack getStorageVestStack() {
-        if (this.storageVestOverride != null) {
-            return this.storageVestOverride;
-        }
-        if (CuriosIntegration.isLoaded()) {
-            ItemStack curiosStack = CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_BODY);
-            if (!curiosStack.isEmpty()) {
-                return curiosStack;
-            }
-        }
-        return this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST))
-                .orElse(ItemStack.EMPTY);
+        return EquipmentSlots.special(player, PlayerBackpack.SLOT_VEST);
     }
 
     private int getStorageSlotCount(ItemStack stack) {
         if (stack.isEmpty()) {
             return 0;
         }
+        int configSlots = BlockZConfigs.getBackpackSlots(stack);
+        if (ItemSizeManager.hasCapacityOverride(stack)) {
+            return Math.max(configSlots, 0);
+        }
         int mmSlots = getModernMayhemInventorySize(stack);
         if (mmSlots > 0) {
             return mmSlots;
         }
-        int configSlots = BlockZConfigs.getBackpackSlots(stack);
         int handlerSlots = stack.getCapability(ForgeCapabilities.ITEM_HANDLER)
                 .map(IItemHandler::getSlots)
                 .orElse(0);
         return Math.max(configSlots, handlerSlots);
     }
 
-    private void loadSectionFromItem(ItemStack stack, int offset, int capacity) {
+    private void loadSectionFromItem(ItemStack stack, int offset, int capacity, ItemStackHandler storage) {
         if (stack.isEmpty() || capacity <= 0) {
             return;
         }
-        if (loadModernMayhemSection(stack, offset, capacity)) {
+        if (loadModernMayhemSection(stack, offset, capacity, storage)) {
             return;
         }
         IItemHandler handler = stack.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
         if (handler != null) {
             int limit = Math.min(capacity, handler.getSlots());
             for (int i = 0; i < limit; i++) {
-                if (offset + i < this.backpackContentHandler.getSlots()) {
+                if (offset + i < storage.getSlots()) {
                     ItemStack loaded = handler.getStackInSlot(i);
-                    this.backpackContentHandler.setStackInSlot(offset + i, loaded.isEmpty() ? ItemStack.EMPTY : loaded.copy());
+                    storage.setStackInSlot(offset + i, loaded.isEmpty() ? ItemStack.EMPTY : loaded.copy());
                 }
             }
             return;
@@ -3819,40 +3105,45 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         ItemStackHandler fallbackHandler = new ItemStackHandler(capacity);
         fallbackHandler.deserializeNBT(stack.getTag().getCompound("Inventory"));
         for (int i = 0; i < Math.min(capacity, fallbackHandler.getSlots()); i++) {
-            if (offset + i < this.backpackContentHandler.getSlots()) {
-                this.backpackContentHandler.setStackInSlot(offset + i, fallbackHandler.getStackInSlot(i));
+            if (offset + i < storage.getSlots()) {
+                storage.setStackInSlot(offset + i, fallbackHandler.getStackInSlot(i));
             }
         }
     }
 
-    private void saveSectionToItem(ItemStack stack, int offset, int capacity) {
+    private void saveSectionToItem(ItemStack stack, int offset, int capacity, ItemStackHandler storage) {
         if (stack.isEmpty() || capacity <= 0) {
             return;
         }
-        if (saveModernMayhemSection(stack, offset, capacity)) {
+        if (saveModernMayhemSection(stack, offset, capacity, storage)) {
             return;
         }
         IItemHandler handler = stack.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
         if (handler != null) {
             int limit = Math.min(capacity, handler.getSlots());
             for (int i = 0; i < limit; i++) {
-                ItemStack content = offset + i < this.backpackContentHandler.getSlots()
-                        ? this.backpackContentHandler.getStackInSlot(offset + i)
+                ItemStack content = offset + i < storage.getSlots()
+                        ? storage.getStackInSlot(offset + i)
                         : ItemStack.EMPTY;
                 replaceItemHandlerSlot(handler, i, content);
             }
             return;
         }
         ItemStackHandler fallbackHandler = new ItemStackHandler(capacity);
-        boolean hasItems = false;
+        if (stack.hasTag() && stack.getTag().contains("Inventory", net.minecraft.nbt.Tag.TAG_COMPOUND)) {
+            var stored = stack.getTag().getCompound("Inventory").copy();
+            stored.putInt("Size", Math.max(capacity, stored.getInt("Size")));
+            fallbackHandler.deserializeNBT(stored);
+        }
         for (int i = 0; i < capacity; i++) {
-            if (offset + i < this.backpackContentHandler.getSlots()) {
-                ItemStack content = this.backpackContentHandler.getStackInSlot(offset + i);
+            if (offset + i < storage.getSlots()) {
+                ItemStack content = storage.getStackInSlot(offset + i);
                 fallbackHandler.setStackInSlot(i, content);
-                if (!content.isEmpty()) {
-                    hasItems = true;
-                }
             }
+        }
+        boolean hasItems = false;
+        for (int i = 0; i < fallbackHandler.getSlots(); i++) {
+            if (!fallbackHandler.getStackInSlot(i).isEmpty()) { hasItems = true; break; }
         }
         if (hasItems) {
             stack.getOrCreateTag().put("Inventory", fallbackHandler.serializeNBT());
@@ -3913,7 +3204,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         }
     }
 
-    private boolean loadModernMayhemSection(ItemStack stack, int offset, int capacity) {
+    private boolean loadModernMayhemSection(ItemStack stack, int offset, int capacity, ItemStackHandler storage) {
         int mmSize = getModernMayhemInventorySize(stack);
         if (mmSize <= 0) {
             return false;
@@ -3926,15 +3217,15 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         handler.deserializeNBT(tag.getCompound("inventory"));
         int limit = Math.min(Math.min(capacity, mmSize), handler.getSlots());
         for (int i = 0; i < limit; i++) {
-            if (offset + i < this.backpackContentHandler.getSlots()) {
+            if (offset + i < storage.getSlots()) {
                 ItemStack loaded = handler.getStackInSlot(i);
-                this.backpackContentHandler.setStackInSlot(offset + i, loaded.isEmpty() ? ItemStack.EMPTY : loaded.copy());
+                storage.setStackInSlot(offset + i, loaded.isEmpty() ? ItemStack.EMPTY : loaded.copy());
             }
         }
         return true;
     }
 
-    private boolean saveModernMayhemSection(ItemStack stack, int offset, int capacity) {
+    private boolean saveModernMayhemSection(ItemStack stack, int offset, int capacity, ItemStackHandler storage) {
         int mmSize = getModernMayhemInventorySize(stack);
         if (mmSize <= 0) {
             return false;
@@ -3943,8 +3234,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         boolean hasItems = false;
         int limit = Math.min(capacity, mmSize);
         for (int i = 0; i < limit; i++) {
-            if (offset + i < this.backpackContentHandler.getSlots()) {
-                ItemStack content = this.backpackContentHandler.getStackInSlot(offset + i);
+            if (offset + i < storage.getSlots()) {
+                ItemStack content = storage.getStackInSlot(offset + i);
                 handler.setStackInSlot(i, content);
                 if (!content.isEmpty()) {
                     hasItems = true;
@@ -3982,199 +3273,48 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
         }
     }
     
-    private int getCorpseBackpackSlots(ItemStack stack) {
-        return BlockZConfigs.getBackpackSlots(stack);
-    }
-    
+
     private ItemStack getCorpseEquipmentStack(int containerIndex) {
         if (!(this.activeContainer instanceof CorpseEntity corpse)) return ItemStack.EMPTY;
         if (containerIndex < 0 || containerIndex >= corpse.getContainerSize()) return ItemStack.EMPTY;
         return corpse.getItem(containerIndex);
     }
     
-    private void loadCorpseStorageFromItems() {
-        if (!(this.activeContainer instanceof CorpseEntity corpse)) return;
-        this.isCorpseLoading = true;
-        
-        ItemStack backpackStack = getCorpseEquipmentStack(0);
-        ItemStack vestStack = getCorpseEquipmentStack(1);
-        ItemStack shirtStack = getCorpseEquipmentStack(2);
-        ItemStack pantsStack = getCorpseEquipmentStack(3);
-        
-        // Use default config, but do NOT move base pockets to Storage
-        // Base Pockets stay in the Corpse Container slots 9-XX
-        int bpCap = getCorpseBackpackSlots(backpackStack);
-        int vestCap = getCorpseBackpackSlots(vestStack);
-        int shirtCap = getCorpseBackpackSlots(shirtStack);
-        int pantsCap = getCorpseBackpackSlots(pantsStack);
-        
-        this.lastCorpseBackpackCap = bpCap;
-        this.lastCorpseVestCap = vestCap;
-        this.lastCorpseShirtCap = shirtCap;
-        this.lastCorpsePantsCap = pantsCap;
-        this.corpseStorageCapacity = Math.min(this.corpseContentHandler.getSlots(), bpCap + vestCap + shirtCap + pantsCap);
-        
-        clearCorpseHandler();
-        
-        int currentOffset = 0;
-        
-        if (bpCap > 0) {
-            if (backpackStack.hasTag() && backpackStack.getTag().contains("Inventory")) {
-                ItemStackHandler bpHandler = new ItemStackHandler(bpCap);
-                bpHandler.deserializeNBT(backpackStack.getTag().getCompound("Inventory"));
-                for (int i = 0; i < Math.min(bpCap, bpHandler.getSlots()); i++) {
-                    if (currentOffset + i < this.corpseContentHandler.getSlots()) {
-                        this.corpseContentHandler.setStackInSlot(currentOffset + i, bpHandler.getStackInSlot(i));
-                    }
-                }
-            }
-            currentOffset += bpCap;
+    private List<StorageSection> getCorpseStorageSections() {
+        List<StorageSection> sections = new ArrayList<>();
+        if (!isPlayerCorpseMode()) return sections;
+        int offset = 0;
+        for (int index : new int[]{0, 1, 2, 3, 4, 5, 7}) {
+            ItemStack stack = getCorpseEquipmentStack(index);
+            int capacity = Math.min(getStorageSlotCount(stack), corpseContentHandler.getSlots() - offset);
+            if (capacity <= 0) continue;
+            int columns = getCapacityColsForItem(stack, UIConstants.VICINITY_COLS, capacity);
+            sections.add(new StorageSection(index, stack, offset, capacity, columns));
+            offset += capacity;
         }
-        
-        if (vestCap > 0) {
-            if (vestStack.hasTag() && vestStack.getTag().contains("Inventory")) {
-                ItemStackHandler vestHandler = new ItemStackHandler(vestCap);
-                vestHandler.deserializeNBT(vestStack.getTag().getCompound("Inventory"));
-                for (int i = 0; i < Math.min(vestCap, vestHandler.getSlots()); i++) {
-                    if (currentOffset + i < this.corpseContentHandler.getSlots()) {
-                        this.corpseContentHandler.setStackInSlot(currentOffset + i, vestHandler.getStackInSlot(i));
-                    }
-                }
-            }
-            currentOffset += vestCap;
-        }
-        
-        if (shirtCap > 0) {
-            if (shirtStack.hasTag() && shirtStack.getTag().contains("Inventory")) {
-                ItemStackHandler shirtHandler = new ItemStackHandler(shirtCap);
-                shirtHandler.deserializeNBT(shirtStack.getTag().getCompound("Inventory"));
-                for (int i = 0; i < Math.min(shirtCap, shirtHandler.getSlots()); i++) {
-                    if (currentOffset + i < this.corpseContentHandler.getSlots()) {
-                        this.corpseContentHandler.setStackInSlot(currentOffset + i, shirtHandler.getStackInSlot(i));
-                    }
-                }
-            }
-            currentOffset += shirtCap;
-        }
-        
-        if (pantsCap > 0) {
-            if (pantsStack.hasTag() && pantsStack.getTag().contains("Inventory")) {
-                ItemStackHandler pantsHandler = new ItemStackHandler(pantsCap);
-                pantsHandler.deserializeNBT(pantsStack.getTag().getCompound("Inventory"));
-                for (int i = 0; i < Math.min(pantsCap, pantsHandler.getSlots()); i++) {
-                    if (currentOffset + i < this.corpseContentHandler.getSlots()) {
-                        this.corpseContentHandler.setStackInSlot(currentOffset + i, pantsHandler.getStackInSlot(i));
-                    }
-                }
-            }
-            currentOffset += pantsCap;
-        }
-        
-        corpseStorageDirty = false;
-        this.isCorpseLoading = false;
+        return sections;
     }
-    
+
+    private void loadCorpseStorageFromItems() {
+        if (!isPlayerCorpseMode()) return;
+        isCorpseLoading = true;
+        try {
+            loadedCorpseStorage = getCorpseStorageSections();
+            corpseStorageCapacity = loadedCorpseStorage.stream().mapToInt(StorageSection::capacity).sum();
+            clearCorpseHandler();
+            for (StorageSection section : loadedCorpseStorage)
+                loadSectionFromItem(section.stack(), section.offset(), section.capacity(), corpseContentHandler);
+            corpseStorageDirty = false;
+        } finally {
+            isCorpseLoading = false;
+        }
+    }
+
     private void saveCorpseStorageToItems() {
-        if (!(this.activeContainer instanceof CorpseEntity corpse)) return;
-        if (this.player == null) return;
-        if (this.player.level().isClientSide) return;
-        if (corpseStorageSlotStart < 0) return;
-        
-        ItemStack backpackStack = getCorpseEquipmentStack(0);
-        ItemStack vestStack = getCorpseEquipmentStack(1);
-        ItemStack shirtStack = getCorpseEquipmentStack(2);
-        ItemStack pantsStack = getCorpseEquipmentStack(3);
-        
-        int currentOffset = 0;
-        
-        if (lastCorpseBackpackCap > 0) {
-            if (!backpackStack.isEmpty()) {
-                ItemStackHandler handler = new ItemStackHandler(lastCorpseBackpackCap);
-                boolean hasItems = false;
-                for (int i = 0; i < lastCorpseBackpackCap; i++) {
-                    if (currentOffset + i < this.corpseContentHandler.getSlots()) {
-                        ItemStack s = this.corpseContentHandler.getStackInSlot(currentOffset + i);
-                        handler.setStackInSlot(i, s);
-                        if (!s.isEmpty()) hasItems = true;
-                    }
-                }
-                if (hasItems) {
-                    backpackStack.getOrCreateTag().put("Inventory", handler.serializeNBT());
-                } else {
-                    net.minecraft.nbt.CompoundTag tag = backpackStack.getTag();
-                    if (tag != null) tag.remove("Inventory");
-                }
-                corpse.setItem(0, backpackStack);
-            }
-            currentOffset += lastCorpseBackpackCap;
-        }
-        
-        if (lastCorpseVestCap > 0) {
-            if (!vestStack.isEmpty()) {
-                ItemStackHandler handler = new ItemStackHandler(lastCorpseVestCap);
-                boolean hasItems = false;
-                for (int i = 0; i < lastCorpseVestCap; i++) {
-                    if (currentOffset + i < this.corpseContentHandler.getSlots()) {
-                        ItemStack s = this.corpseContentHandler.getStackInSlot(currentOffset + i);
-                        handler.setStackInSlot(i, s);
-                        if (!s.isEmpty()) hasItems = true;
-                    }
-                }
-                if (hasItems) {
-                    vestStack.getOrCreateTag().put("Inventory", handler.serializeNBT());
-                } else {
-                    net.minecraft.nbt.CompoundTag tag = vestStack.getTag();
-                    if (tag != null) tag.remove("Inventory");
-                }
-                corpse.setItem(1, vestStack);
-            }
-            currentOffset += lastCorpseVestCap;
-        }
-        
-        if (lastCorpseShirtCap > 0) {
-            if (!shirtStack.isEmpty()) {
-                ItemStackHandler handler = new ItemStackHandler(lastCorpseShirtCap);
-                boolean hasItems = false;
-                for (int i = 0; i < lastCorpseShirtCap; i++) {
-                    if (currentOffset + i < this.corpseContentHandler.getSlots()) {
-                        ItemStack s = this.corpseContentHandler.getStackInSlot(currentOffset + i);
-                        handler.setStackInSlot(i, s);
-                        if (!s.isEmpty()) hasItems = true;
-                    }
-                }
-                if (hasItems) {
-                    shirtStack.getOrCreateTag().put("Inventory", handler.serializeNBT());
-                } else {
-                    net.minecraft.nbt.CompoundTag tag = shirtStack.getTag();
-                    if (tag != null) tag.remove("Inventory");
-                }
-                corpse.setItem(2, shirtStack);
-            }
-            currentOffset += lastCorpseShirtCap;
-        }
-        
-        if (lastCorpsePantsCap > 0) {
-            if (!pantsStack.isEmpty()) {
-                ItemStackHandler handler = new ItemStackHandler(lastCorpsePantsCap);
-                boolean hasItems = false;
-                for (int i = 0; i < lastCorpsePantsCap; i++) {
-                    if (currentOffset + i < this.corpseContentHandler.getSlots()) {
-                        ItemStack s = this.corpseContentHandler.getStackInSlot(currentOffset + i);
-                        handler.setStackInSlot(i, s);
-                        if (!s.isEmpty()) hasItems = true;
-                    }
-                }
-                if (hasItems) {
-                    pantsStack.getOrCreateTag().put("Inventory", handler.serializeNBT());
-                } else {
-                    net.minecraft.nbt.CompoundTag tag = pantsStack.getTag();
-                    if (tag != null) tag.remove("Inventory");
-                }
-                corpse.setItem(3, pantsStack);
-            }
-            currentOffset += lastCorpsePantsCap;
-        }
-        
+        if (!(activeContainer instanceof CorpseEntity corpse) || player == null || player.level().isClientSide
+                || isCorpseLoading || corpseStorageSlotStart < 0) return;
+        for (StorageSection section : loadedCorpseStorage)
+            saveSectionToItem(section.stack(), section.offset(), section.capacity(), corpseContentHandler);
         corpse.setChanged();
     }
 
@@ -4229,18 +3369,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu implements StorageR
             saveBackpackToItem();
             saveCorpseStorageToItems();
             
-            // Special handling for Shirt (31) and Pants (32) to prevent duplication
-            if (index == VICINITY_SLOTS + 1) { // Shirt
-                 Slot slot = this.slots.get(index);
-                 if (slot.hasItem()) {
-                     dropShirtItems(player, slot.getItem());
-                 }
-            } else if (index == VICINITY_SLOTS + 2) { // Pants
-                 Slot slot = this.slots.get(index);
-                 if (slot.hasItem()) {
-                     dropPantsItems(player, slot.getItem());
-                 }
-            }
+
         }
 
         Slot slot = this.slots.get(index);

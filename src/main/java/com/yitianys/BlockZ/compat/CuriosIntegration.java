@@ -123,15 +123,12 @@ public final class CuriosIntegration {
             List<CurioSlotRef> refs = new ArrayList<>();
             for (Map.Entry<String, ICurioStacksHandler> entry : handler.getCurios().entrySet()) {
                 String slotId = entry.getKey();
-                if (isMirroredDayZSlot(slotId)) {
-                    continue;
-                }
                 ICurioStacksHandler stacksHandler = entry.getValue();
                 if (stacksHandler == null || !stacksHandler.isVisible()) {
                     continue;
                 }
                 IDynamicStackHandler dynamic = stacksHandler.getStacks();
-                for (int i = 0; i < dynamic.getSlots(); i++) {
+                for (int i = isMirroredDayZSlot(slotId) ? 1 : 0; i < dynamic.getSlots(); i++) {
                     refs.add(new CurioSlotRef(slotId, i));
                 }
             }
@@ -224,6 +221,15 @@ public final class CuriosIntegration {
         }
         player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
             ItemStackHandler handler = cap.getInventory();
+            if (!cap.hasMigratedSpecialEquipment()) {
+                for (int slot : new int[]{PlayerBackpack.SLOT_BACKPACK, PlayerBackpack.SLOT_VEST, PlayerBackpack.SLOT_MASK}) {
+                    String id = com.yitianys.BlockZ.equipment.EquipmentRules.curioSlot(slot);
+                    if (hasSlotHandler(player, id) && getEquippedDirect(player, id).isEmpty() && !handler.getStackInSlot(slot).isEmpty())
+                        setEquipped(player, id, handler.getStackInSlot(slot));
+                }
+                cap.markSpecialEquipmentMigrated();
+            }
+
             if (hasSlotHandler(player, SLOT_BACK)) {
                 ItemStack curio = getEquipped(player, SLOT_BACK);
                 syncHandlerSlot(handler, PlayerBackpack.SLOT_BACKPACK, safeCopy(curio));
@@ -239,7 +245,7 @@ public final class CuriosIntegration {
         });
     }
 
-    private static boolean hasSlotHandler(Player player, String slotId) {
+    public static boolean hasSlotHandler(Player player, String slotId) {
         if (!isLoaded() || player == null) {
             return false;
         }
@@ -263,12 +269,7 @@ public final class CuriosIntegration {
 
     private static void syncHandlerSlot(ItemStackHandler handler, int slot, ItemStack stack) {
         ItemStack current = handler.getStackInSlot(slot);
-        // 仅在 Curios 端的物品不为空时才同步到 Capability
-        // 这样如果 Curios 因为某种原因（如初始化顺序或配置）没能提供物品，
-        // 我们能保留 Capability 自身从 NBT 加载的数据，防止物品消失。
-        if (!stack.isEmpty() && !ItemStack.isSameItemSameTags(current, stack)) {
-            handler.setStackInSlot(slot, safeCopy(stack));
-        }
+        if (!ItemStack.matches(current, stack)) handler.setStackInSlot(slot, safeCopy(stack));
     }
 
     public static ItemStack createMirrorStack(ItemStack stack) {

@@ -13,6 +13,7 @@ import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.network.OpenDayZMenuC2S;
 import com.yitianys.BlockZ.util.DayZStatsManager;
 import com.yitianys.BlockZ.util.ProneManager;
+import com.yitianys.BlockZ.ui.DayZUiPolicy;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -413,37 +414,35 @@ public class ClientEvents {
 
     @SubscribeEvent
     public static void onScreenOpening(ScreenEvent.Opening event) {
-        boolean inventoryUiEnabled = BlockZConfigs.isDayzInventoryEnabled() && ClientSettings.dayzEnabled;
+        Minecraft mc = Minecraft.getInstance();
+        if (event.getScreen() instanceof net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen) return;
+        boolean inventoryUiEnabled = BlockZConfigs.isDayzInventoryEnabled()
+                && DayZUiPolicy.shouldUseDayZ(mc.player);
         if (event.getScreen() instanceof InventoryScreen) {
-            Minecraft mc = Minecraft.getInstance();
             if (mc.player == null) return;
             
             // 只有当 DayZ UI 启用时才拦截
             if (inventoryUiEnabled) {
-                BlockZ.LOGGER.info("Intercepting InventoryScreen opening, sending OpenDayZMenuC2S to server. dayzEnabled={}, inventoryUiEnabled={}", ClientSettings.dayzEnabled, inventoryUiEnabled);
+                BlockZ.LOGGER.info("Intercepting survival InventoryScreen opening and requesting the DayZ menu");
                 NetworkHandler.CHANNEL.sendToServer(new OpenDayZMenuC2S());
                 if (!isArclightServer()) {
                     event.setCanceled(true);
                 }
             } else {
-                BlockZ.LOGGER.info("Allowing InventoryScreen opening. dayzEnabled={}, inventoryUiEnabled={}", ClientSettings.dayzEnabled, inventoryUiEnabled);
+                BlockZ.LOGGER.info("Allowing the vanilla InventoryScreen for the current game mode");
             }
         } else if (event.getScreen() instanceof AbstractContainerScreen<?> containerScreen) {
-            if (inventoryUiEnabled) {
-                if (event.getScreen() instanceof com.yitianys.BlockZ.client.gui.DayZInventoryScreen) return;
-                if (event.getScreen() instanceof com.yitianys.BlockZ.client.gui.DayZChestScreen) return;
+            if (BlockZConfigs.isDayzInventoryEnabled() && mc.player != null) {
+                if (event.getScreen() instanceof com.yitianys.BlockZ.client.gui.PanelInventoryScreen<?>) return;
 
-                Minecraft mc = Minecraft.getInstance();
                 if (mc.player == null) return;
                 if (containerScreen.getMenu() == mc.player.inventoryMenu) return;
 
-                if (isArclightServer() && containerScreen.getMenu() instanceof ChestMenu chestMenu) {
-                    event.setCanceled(true);
-                    mc.setScreen(new com.yitianys.BlockZ.client.gui.DayZChestScreen(chestMenu, mc.player.getInventory(), containerScreen.getTitle()));
-                    return;
-                }
-
-                if (shouldSkipDayZOverride(containerScreen)) {
+                boolean nativeContainer = containerScreen.getClass().getName().startsWith("net.minecraft.client.gui.screens.inventory.");
+                if (!inventoryUiEnabled || shouldSkipDayZOverride(containerScreen) || isArclightServer()) {
+                    if (nativeContainer) {
+                        event.setNewScreen(new com.yitianys.BlockZ.client.gui.DayZContainerScreen<>(containerScreen, mc.player.getInventory()));
+                    }
                     return;
                 }
 
@@ -496,10 +495,9 @@ public class ClientEvents {
 
     private static void tryPickup(PlayerInteractEvent event) {
         if (!event.getLevel().isClientSide) return;
-        if (!ClientSettings.dayzEnabled) return;
-        
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
+        if (!DayZUiPolicy.shouldUseDayZ(mc.player)) return;
 
         Entity entity = InventoryUtils.getTargetedItemEntity(mc.player, 4.0); // 4 blocks reach
         if (entity != null) {

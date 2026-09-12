@@ -1,9 +1,7 @@
 package com.yitianys.BlockZ.effect;
 
-import java.util.ArrayList;
 import java.util.List;
 
-import com.yitianys.BlockZ.init.ModItems;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
@@ -47,9 +45,6 @@ public class BleedingEffect extends MobEffect {
 
     @Override
     public List<ItemStack> getCurativeItems() {
-        List<ItemStack> items = new ArrayList<>();
-        items.add(new ItemStack(ModItems.BANDAGE.get()));
-        items.add(new ItemStack(ModItems.RAGS.get()));
-        return items;
+        return List.of();
     }
 }

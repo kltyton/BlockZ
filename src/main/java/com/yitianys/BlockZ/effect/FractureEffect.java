@@ -1,10 +1,8 @@
 package com.yitianys.BlockZ.effect;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import com.yitianys.BlockZ.init.ModItems;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectCategory;
@@ -59,8 +57,6 @@ public class FractureEffect extends MobEffect {
 
     @Override
     public List<ItemStack> getCurativeItems() {
-        List<ItemStack> items = new ArrayList<>();
-        items.add(new ItemStack(ModItems.SPLINT.get()));
-        return items;
+        return List.of();
     }
 }

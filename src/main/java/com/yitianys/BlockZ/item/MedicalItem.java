@@ -26,6 +26,11 @@ public class MedicalItem extends Item {
     }
 
     @Override
+    public net.minecraft.world.InteractionResultHolder<ItemStack> use(Level level, net.minecraft.world.entity.player.Player player, net.minecraft.world.InteractionHand hand) {
+        return net.minecraft.world.InteractionResultHolder.fail(player.getItemInHand(hand));
+    }
+
+    @Override
     public ItemStack getDefaultInstance() {
         ItemStack stack = super.getDefaultInstance();
         ensureMedicalTags(stack);

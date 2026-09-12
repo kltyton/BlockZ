@@ -96,10 +96,6 @@ public class DayZHudOverlay {
         RenderSystem.defaultBlendFunc();
         RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
 
-        // 1. Top Left: Mod Info (更简洁)
-        String modInfo = "BlockZ";
-        guiGraphics.drawString(mc.font, modInfo, 8, 8, 0x60FFFFFF, true);
-
         // 2. Bottom Center: Hotbar
         int hotbarSlots = 9;
         int slotSize = 18; // 稍微缩小一点
@@ -317,14 +313,7 @@ public class DayZHudOverlay {
 
         ItemStack usingItem = player.getUseItem();
         if (nursingEnabled && !usingItem.isEmpty() && player.isUsingItem()) {
-            boolean isNursingUse = usingItem.is(ModItems.SPLINT.get())
-                    || usingItem.is(ModItems.BANDAGE.get())
-                    || usingItem.is(ModItems.RAGS.get())
-                    || usingItem.is(ModItems.MORPHINE_SYRINGE.get())
-                    || usingItem.is(ModItems.CODEINE_PILLS.get())
-                    || (usingItem.getItem() instanceof ClothingItem clothing && (clothing.getType() == ClothingItem.ClothingType.SHIRT
-                        || clothing.getType() == ClothingItem.ClothingType.PANTS
-                        || clothing.getType() == ClothingItem.ClothingType.VEST));
+            boolean isNursingUse = com.yitianys.BlockZ.config.MedicalMappings.find(usingItem) != null;
 
             if (isNursingUse) {
                 int maxUse = usingItem.getUseDuration();

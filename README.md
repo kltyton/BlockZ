@@ -7,10 +7,10 @@
 ## 🌟 核心功能
 
 ### 1. 全新的 DayZ 风格 GUI
-- **三面板布局**：左侧为“附近物品 (VICINITY)”，中间为“玩家状态 (PLAYER)”，右侧为“物品栏 (INVENTORY)”。
+- **三面板布局**：左侧为“玩家状态 (PLAYER)”，中间为“物品栏 (INVENTORY)”，右侧为“附近物品 (VICINITY)”。
 - **附近物品系统**：实时检测玩家周围 2.0 格范围内的掉落物，支持直接点击拾取或拖拽丢弃。
 - **拖拽丢弃**：将物品拖拽到 Vicinity 区域即可直接丢弃到世界中。
-- **界面切换**：支持通过命令 `/blockz_toggle_ui <true|false>` 在 DayZ 风格界面与原版界面之间切换（需要 OP/管理员权限）。
+- **自动界面**：创造模式使用原版界面，生存及其他非创造模式自动使用 DayZ 风格界面，不提供手动切换。
 
 ### 2. 动态背包与锁定系统
 - **独立容器**：背包不再是简单的格子扩展，每个背包物品都有独立的 NBT 储存空间。
@@ -46,10 +46,9 @@
 ## 📖 使用教程
 
 ### 1. 基础操作
-- **打开背包**：按 `E` 键打开 DayZ 风格背包（默认）。
-- **切换界面**：如果不习惯 DayZ 风格，可以输入命令 `/blockz_toggle_ui <true|false>` 切换（需要 OP/管理员权限）。
+- **打开背包**：生存模式按 `E` 打开 DayZ 风格背包；创造模式按 `E` 打开原版创造背包。
 - **拾取物品**：
-  - **Vicinity 面板**（左侧）：显示周围地上的物品，点击即可捡起。
+  - **Vicinity 面板**（右侧）：显示周围地上的物品，点击即可捡起。
   - **拖拽**：将物品从 Vicinity 拖到背包中，或从背包拖到 Vicinity 丢弃。
 
 ### 2. 背包扩容指南
@@ -67,10 +66,6 @@
 [ui]
     # UI 缩放比例 (0.5 - 2.0)
     "ui.scale" = 1.0
-    # 允许玩家使用命令切换 UI 风格
-    "ui.allow_player_toggle" = true
-    # 是否显示 DayZ UI 切换提示
-    "ui.show_dayz_toggle_hint" = true
     # 是否显示 DayZ HUD 覆盖层
     "ui.show_dayz_hud" = true
     # 是否启用护理系统（伤口/骨折/绷带等）
@@ -136,10 +131,11 @@
     *修改配置文件后，使用命令 `/blockz_reload` 让服务端重载并同步到客户端（需要 OP/管理员权限）。*
 
 ### 6. 管理员命令
-- `/blockz_toggle_ui <true|false> [target]`：切换指定玩家是否使用 DayZ UI。
 - `/blockz_reload`：重载 `grid_items.json` 并同步客户端。
 - `/blockz_grid_item <width> <height> [color]`：修改主手物品的占格大小与可选背景色（不填颜色则回退默认颜色），写入 `grid_items.json` 并同步客户端。
 - `/blockz_clothing_capacity <width> <height>`：仅限主手衣物，修改衣物/背包容量网格 `cap_width/cap_height`，写入 `grid_items.json` 并同步客户端。
+- `/cap hand <width> <height>`：修改当前主手容器这一件物品的容量网格形状；宽度最大 9，面积最大 256。
+- `/size hand <slots>`：修改当前主手容器这一件物品的最大槽位数，范围 1–256；若缩容会截断已有物品则拒绝执行。
 - `/blockz_clear_corpse [targets]`：清理尸体实体。
 
 ### 7. 物品指南

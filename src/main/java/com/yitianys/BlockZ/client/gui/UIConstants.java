@@ -2,7 +2,7 @@ package com.yitianys.BlockZ.client.gui;
 
 public class UIConstants {
     // 总尺寸 (Expanded for 9-col Vicinity)
-    // Vicinity (170) + Gap (2) + Player (96) + Gap (2) + Inventory (96) = 366
+    // Player (96) + Gap (2) + Inventory (96) + Gap (2) + Vicinity (170) = 366
     // 若 cap_width 超过 5，界面会在 Screen 层动态扩展宽度
     public static final int WIDTH = 366;
     public static final int HEIGHT = 200;
@@ -15,10 +15,10 @@ public class UIConstants {
     public static final int VICINITY_PANEL_W = 170; // 9-col panel width (9*18 + 8)
     public static final int PANEL_H = 200; 
     
-    // 面板 X 坐标 (居中布局)
-    public static final int VICINITY_X = (WIDTH - (VICINITY_PANEL_W + PANEL_W + INVENTORY_PANEL_W + 4)) / 2;
-    public static final int PLAYER_X = VICINITY_X + VICINITY_PANEL_W + 2;
+    // 面板 X 坐标：PLAYER -> INVENTORY -> VICINITY
+    public static final int PLAYER_X = 0;
     public static final int INVENTORY_X = PLAYER_X + PANEL_W + 2;
+    public static final int VICINITY_X = INVENTORY_X + INVENTORY_PANEL_W + 2;
 
     // 面板 Y 坐标
     public static final int PANEL_Y = (HEIGHT - PANEL_H) / 2;
@@ -86,4 +86,12 @@ public class UIConstants {
     public static final int VICINITY_COLS = 9;
     public static final int VICINITY_SLOTS_X = VICINITY_X + 4;
     public static final int VICINITY_SLOTS_Y = PANEL_Y + 10;
+
+    public static int inventoryExtraWidth(int inventoryColumns) {
+        return Math.max(0, inventoryColumns - INVENTORY_COLS) * SLOT_PITCH;
+    }
+
+    public static int inventoryPanelWidth(int inventoryColumns) {
+        return INVENTORY_PANEL_W + inventoryExtraWidth(inventoryColumns);
+    }
 }

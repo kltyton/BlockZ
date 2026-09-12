@@ -10,31 +10,34 @@ public class BlockZPlayerItemHandler implements IItemHandler {
     private final Player player;
     private final IItemHandler playerInventoryHandler;
     private final NestedStorageItemHandler vestHandler;
-    private final NestedStorageItemHandler shirtHandler;
-    private final NestedStorageItemHandler pantsHandler;
+    private final NestedStorageItemHandler maskHandler;
+    private final NestedStorageItemHandler backpackHandler;
+    private final NestedStorageItemHandler[] armorHandlers = new NestedStorageItemHandler[4];
 
     public BlockZPlayerItemHandler(Player player) {
         this.player = player;
         this.playerInventoryHandler = new InvWrapper(player.getInventory());
-        this.vestHandler = new NestedStorageItemHandler(() -> player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST))
-                .orElse(ItemStack.EMPTY));
-        this.shirtHandler = new NestedStorageItemHandler(() -> player.getInventory().getArmor(2));
-        this.pantsHandler = new NestedStorageItemHandler(() -> player.getInventory().getArmor(1));
+        this.vestHandler = new NestedStorageItemHandler(() -> com.yitianys.BlockZ.equipment.EquipmentSlots.special(player, PlayerBackpack.SLOT_VEST));
+        this.maskHandler = new NestedStorageItemHandler(() -> com.yitianys.BlockZ.equipment.EquipmentSlots.special(player, PlayerBackpack.SLOT_MASK));
+        this.backpackHandler = new NestedStorageItemHandler(() -> com.yitianys.BlockZ.equipment.EquipmentSlots.special(player, PlayerBackpack.SLOT_BACKPACK));
+        for (int i = 0; i < armorHandlers.length; i++) {
+            final int index = i;
+            armorHandlers[i] = new NestedStorageItemHandler(() -> com.yitianys.BlockZ.equipment.EquipmentSlots.armor(player, index));
+        }
     }
 
     public void syncNestedStorages() {
         vestHandler.syncToStack();
-        shirtHandler.syncToStack();
-        pantsHandler.syncToStack();
+        maskHandler.syncToStack();
+        backpackHandler.syncToStack();
+        for (NestedStorageItemHandler handler : armorHandlers) handler.syncToStack();
     }
 
     @Override
     public int getSlots() {
-        return playerInventoryHandler.getSlots()
-                + vestHandler.getSlots()
-                + shirtHandler.getSlots()
-                + pantsHandler.getSlots();
+        int slots = playerInventoryHandler.getSlots() + vestHandler.getSlots() + maskHandler.getSlots() + backpackHandler.getSlots();
+        for (NestedStorageItemHandler handler : armorHandlers) slots += handler.getSlots();
+        return slots;
     }
 
     @Override
@@ -94,12 +97,13 @@ public class BlockZPlayerItemHandler implements IItemHandler {
             return new SlotAccess(vestHandler, remaining);
         }
         remaining -= vestHandler.getSlots();
-        if (remaining < shirtHandler.getSlots()) {
-            return new SlotAccess(shirtHandler, remaining);
-        }
-        remaining -= shirtHandler.getSlots();
-        if (remaining < pantsHandler.getSlots()) {
-            return new SlotAccess(pantsHandler, remaining);
+        if (remaining < maskHandler.getSlots()) return new SlotAccess(maskHandler, remaining);
+        remaining -= maskHandler.getSlots();
+        if (remaining < backpackHandler.getSlots()) return new SlotAccess(backpackHandler, remaining);
+        remaining -= backpackHandler.getSlots();
+        for (NestedStorageItemHandler handler : armorHandlers) {
+            if (remaining < handler.getSlots()) return new SlotAccess(handler, remaining);
+            remaining -= handler.getSlots();
         }
         return null;
     }

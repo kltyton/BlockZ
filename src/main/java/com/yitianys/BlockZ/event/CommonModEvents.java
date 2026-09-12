@@ -39,6 +39,7 @@ import net.minecraft.world.entity.Entity;
 import com.yitianys.BlockZ.util.DayZPlayerStatusManager;
 import com.yitianys.BlockZ.util.InventoryUtils;
 import com.yitianys.BlockZ.util.ProneManager;
+import com.yitianys.BlockZ.ui.DayZUiPolicy;
 import net.minecraftforge.items.IItemHandler;
 
 import java.util.Map;
@@ -264,9 +265,7 @@ public class CommonModEvents {
             }
         }
         
-        boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::isDayzEnabled)
-                .orElse(true);
+        boolean dayzEnabled = DayZUiPolicy.shouldUseDayZ(player);
         boolean isAdmin = player.hasPermissions(2);
         boolean lockEnabled = BlockZConfigs.getEnableVanillaBackpackLock();
 
@@ -277,17 +276,13 @@ public class CommonModEvents {
             // 基础口袋槽位 (5格, 对应原版 9-13)
             allowedSlots = BlockZConfigs.getInitialPocketSlots();
 
-            // 获取装备提供的槽位 (在 Vanilla UI 模式下禁用)
-            // allowedSlots += player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).map(cap -> {
-            //     IItemHandler handler = cap.getInventory();
-            //     int slots = 0;
-            //     slots += BlockZConfigs.getBackpackSlots(handler.getStackInSlot(PlayerBackpack.SLOT_BACKPACK));
-            //     slots += BlockZConfigs.getBackpackSlots(handler.getStackInSlot(PlayerBackpack.SLOT_VEST));
-            //     return slots;
-            // }).orElse(0);
-            
-            // allowedSlots += BlockZConfigs.getBackpackSlots(inv.getArmor(2)); // Shirt (Chestplate)
-            // allowedSlots += BlockZConfigs.getBackpackSlots(inv.getArmor(1)); // Pants (Leggings)
+            // 已穿戴的背包、背心、上衣和裤子按各自容量解锁额外栏位。
+            allowedSlots += player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).map(cap -> {
+                IItemHandler handler = cap.getInventory();
+                return BlockZConfigs.getBackpackSlots(handler.getStackInSlot(PlayerBackpack.SLOT_BACKPACK))
+                    + BlockZConfigs.getBackpackSlots(handler.getStackInSlot(PlayerBackpack.SLOT_VEST));
+            }).orElse(0);
+            for (int i = 0; i < 4; i++) allowedSlots += BlockZConfigs.getBackpackSlots(com.yitianys.BlockZ.equipment.EquipmentSlots.armor(player, i));
         }
 
         int unlockedEndIndex = 9 + allowedSlots;
@@ -591,9 +586,7 @@ public class CommonModEvents {
         Player player = event.getEntity();
         if (player.isSpectator()) return;
 
-        boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::isDayzEnabled)
-                .orElse(true);
+        boolean dayzEnabled = DayZUiPolicy.shouldUseDayZ(player);
 
         // 如果 DayZ UI 被禁用，允许原版交互
         if (!dayzEnabled) return;
@@ -658,9 +651,7 @@ public class CommonModEvents {
         Player player = event.getEntity();
         if (player.isSpectator()) return;
 
-        boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::isDayzEnabled)
-                .orElse(true);
+        boolean dayzEnabled = DayZUiPolicy.shouldUseDayZ(player);
 
         if (!dayzEnabled) return;
         if (isModernMayhemBackpackItem(event.getItemStack())) {
@@ -678,9 +669,7 @@ public class CommonModEvents {
         Player player = event.getEntity();
         if (player.isSpectator()) return;
 
-        boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::isDayzEnabled)
-                .orElse(true);
+        boolean dayzEnabled = DayZUiPolicy.shouldUseDayZ(player);
 
         if (!dayzEnabled) return;
         if (clientTryPickup(event, player)) {
@@ -766,9 +755,7 @@ public class CommonModEvents {
         if (event.getEntity().level().isClientSide) return;
 
         Player player = event.getEntity();
-        boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::isDayzEnabled)
-                .orElse(true);
+        boolean dayzEnabled = DayZUiPolicy.shouldUseDayZ(player);
 
         // DayZ 模式下，禁用自然拾取 (走过物品时不拾取)
         if (dayzEnabled) {
@@ -776,4 +763,3 @@ public class CommonModEvents {
         }
     }
 }
-

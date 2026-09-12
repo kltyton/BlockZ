@@ -25,6 +25,11 @@ public abstract class MixinPlayerRenderer extends LivingEntityRenderer<AbstractC
         super(context, model, shadowRadius);
     }
 
+    @Inject(method = "<init>", at = @At("TAIL"))
+    private void blockz$extraEquipment(EntityRendererProvider.Context context, boolean slim, CallbackInfo ci) {
+        this.addLayer(new com.yitianys.BlockZ.client.renderer.layer.ExtraEquipmentLayer((PlayerRenderer) (Object) this, context, slim));
+    }
+
     @Inject(method = "render(Lnet/minecraft/client/player/AbstractClientPlayer;FFLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;I)V", at = @At("HEAD"))
     private void blockz$beforeRender(AbstractClientPlayer player, float entityYaw, float partialTicks, PoseStack poseStack, MultiBufferSource buffer, int packedLight, CallbackInfo ci) {
         PlayerModel<AbstractClientPlayer> model = this.getModel();
@@ -33,7 +38,6 @@ public abstract class MixinPlayerRenderer extends LivingEntityRenderer<AbstractC
 
     @Inject(method = "setModelProperties", at = @At("RETURN"))
     private void blockz$afterSetModelProperties(AbstractClientPlayer player, CallbackInfo ci) {
-        ClothingLayer.applyOuterLayerVisibility(player, this.getModel());
         if (!FirstPersonBodyRenderState.isRendering()) {
             return;
         }

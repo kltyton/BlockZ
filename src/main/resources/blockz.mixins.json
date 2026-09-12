@@ -11,7 +11,15 @@
     "MixinLivingEntityShoot",
     "MixinModernKineticGunScriptAPI",
     "MixinSlot",
-    "MixinPlayer"
+    "MixinPlayer",
+    "MixinItemStackMedical",
+    "MixinLivingEntityMedical",
+    "MixinPlayerEquipment",
+    "MixinMeshArmorEffects",
+    "MixinMeshEquipmentDamage",
+    "MeshEquipmentEventsAccess",
+    "MixinEquipmentEnchantments",
+    "MixinEquipmentFlight"
   ],
   "client": [
     "client.MixinPlayerRenderer",
@@ -35,7 +43,13 @@
     "client.MixinEntityRenderDispatcherLean",
     "client.MixinRenderHeadShotAABBLean",
     "MixinLocalPlayerReload",
-    "MixinGunHudOverlay"
+    "MixinGunHudOverlay",
+    "client.ContainerScreenAccess",
+    "client.SlotPositionAccess",
+    "client.ScreenRenderAccess",
+    "client.MixinNativeContainerGraphics",
+    "client.MixinNativeScreenBackground",
+    "client.MixinMeshArmorRendering"
   ],
   "injectors": {
     "defaultRequire": 1

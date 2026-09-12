@@ -32,9 +32,22 @@ public class ItemSizeManager {
     private static final Map<Item, Integer> GRID_COLORS = new ConcurrentHashMap<>();
     private static final java.util.List<NbtRule> NBT_RULES = new java.util.concurrent.CopyOnWriteArrayList<>();
     private static final String ROTATED_TAG = "blockz_rotated";
+    private static final String CAPACITY_WIDTH_TAG = "blockz_capacity_width";
+    private static final String CAPACITY_HEIGHT_TAG = "blockz_capacity_height";
+    private static final String MAXIMUM_SLOTS_TAG = "blockz_maximum_slots";
+    private static final int MAX_STORAGE_SLOTS = 256;
     private static volatile Boolean syncedGridEnabled = null;
 
-    public record NbtRule(Item item, String nbtKey, String nbtValue, int width, int height) {}
+    public record NbtRule(Item item, String nbtKey, String nbtValue, int width, int height, int slots, int columns, Integer color) {
+        public NbtRule(Item item, String nbtKey, String nbtValue, int width, int height) {
+            this(item, nbtKey, nbtValue, width, height, -1, -1, null);
+        }
+
+        public boolean matches(ItemStack stack) {
+            return stack.getItem() == item && stack.hasTag() && stack.getTag().contains(nbtKey)
+                    && nbtValue.equals(stack.getTag().getString(nbtKey));
+        }
+    }
 
     public static void registerSize(Item item, int width, int height) {
         SIZES.put(item, new ItemSize(width, height));
@@ -63,7 +76,7 @@ public class ItemSizeManager {
                 return SIZES.getOrDefault(stack.getItem(), new ItemSize(1, 1));
             }
             for (NbtRule rule : NBT_RULES) {
-                if (rule.item() == stack.getItem()) {
+                if (rule.item() == stack.getItem() && rule.width() > 0 && rule.height() > 0) {
                     String nbtKey = rule.nbtKey();
                     String nbtValue = rule.nbtValue();
                     if (nbtKey == null || nbtValue == null) {
@@ -119,8 +132,59 @@ public class ItemSizeManager {
 
     public static int getCustomSlots(ItemStack stack) {
         if (stack.isEmpty()) return -1;
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        if (tag != null) {
+            if (tag.contains(MAXIMUM_SLOTS_TAG, net.minecraft.nbt.Tag.TAG_ANY_NUMERIC)) {
+                return clampStorageSlots(tag.getInt(MAXIMUM_SLOTS_TAG));
+            }
+            if (tag.contains(CAPACITY_WIDTH_TAG, net.minecraft.nbt.Tag.TAG_ANY_NUMERIC)
+                    && tag.contains(CAPACITY_HEIGHT_TAG, net.minecraft.nbt.Tag.TAG_ANY_NUMERIC)) {
+                int width = tag.getInt(CAPACITY_WIDTH_TAG);
+                int height = tag.getInt(CAPACITY_HEIGHT_TAG);
+                if (width > 0 && height > 0) {
+                    return clampStorageSlots((long) width * height);
+                }
+            }
+        }
+        for (NbtRule rule : NBT_RULES) {
+            if (rule.slots() >= 0 && rule.matches(stack)) return rule.slots();
+        }
         Integer slots = CUSTOM_SLOTS.get(stack.getItem());
         return slots == null ? -1 : slots;
+    }
+
+    public static boolean hasCapacityOverride(ItemStack stack) {
+        if (stack.isEmpty() || !stack.hasTag()) return false;
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        return tag != null && (tag.contains(MAXIMUM_SLOTS_TAG, net.minecraft.nbt.Tag.TAG_ANY_NUMERIC)
+                || (tag.contains(CAPACITY_WIDTH_TAG, net.minecraft.nbt.Tag.TAG_ANY_NUMERIC)
+                    && tag.contains(CAPACITY_HEIGHT_TAG, net.minecraft.nbt.Tag.TAG_ANY_NUMERIC)));
+    }
+
+    public static boolean hasMaximumSlotsOverride(ItemStack stack) {
+        if (stack.isEmpty() || !stack.hasTag()) return false;
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        return tag != null && tag.contains(MAXIMUM_SLOTS_TAG, net.minecraft.nbt.Tag.TAG_ANY_NUMERIC);
+    }
+
+    public static void setCapacityShapeOverride(ItemStack stack, int width, int height) {
+        if (stack.isEmpty() || width <= 0 || height <= 0 || (long) width * height > MAX_STORAGE_SLOTS) {
+            throw new IllegalArgumentException("Invalid capacity shape: " + width + "x" + height);
+        }
+        net.minecraft.nbt.CompoundTag tag = stack.getOrCreateTag();
+        tag.putInt(CAPACITY_WIDTH_TAG, width);
+        tag.putInt(CAPACITY_HEIGHT_TAG, height);
+    }
+
+    public static void setMaximumSlotsOverride(ItemStack stack, int slots) {
+        if (stack.isEmpty() || slots <= 0 || slots > MAX_STORAGE_SLOTS) {
+            throw new IllegalArgumentException("Invalid maximum slot count: " + slots);
+        }
+        stack.getOrCreateTag().putInt(MAXIMUM_SLOTS_TAG, slots);
+    }
+
+    private static int clampStorageSlots(long slots) {
+        return (int) Math.max(1L, Math.min(slots, MAX_STORAGE_SLOTS));
     }
 
     public static void registerSlots(Item item, int slots) {
@@ -166,11 +230,22 @@ public class ItemSizeManager {
 
     public static int getCapacityCols(ItemStack stack, int defaultCols) {
         if (stack.isEmpty()) return defaultCols;
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        if (tag != null && tag.contains(CAPACITY_WIDTH_TAG, net.minecraft.nbt.Tag.TAG_ANY_NUMERIC)) {
+            int width = tag.getInt(CAPACITY_WIDTH_TAG);
+            if (width > 0) {
+                return width;
+            }
+        }
+        for (NbtRule rule : NBT_RULES) {
+            if (rule.columns() > 0 && rule.matches(stack)) return rule.columns();
+        }
         Integer w = CUSTOM_CAP_WIDTH.get(stack.getItem());
         if (w != null && w > 0) {
             return w;
         }
-        return defaultCols;
+        int meshColumns = com.yitianys.BlockZ.compat.MeshEquipment.storageColumns(stack);
+        return meshColumns > 0 ? meshColumns : defaultCols;
     }
 
     public static boolean isGridEnabled() {
@@ -182,6 +257,9 @@ public class ItemSizeManager {
 
     public static Integer getGridColor(ItemStack stack) {
         if (stack.isEmpty()) return null;
+        for (NbtRule rule : NBT_RULES) {
+            if (rule.color() != null && rule.matches(stack)) return rule.color();
+        }
         return GRID_COLORS.get(stack.getItem());
     }
 
@@ -229,6 +307,9 @@ public class ItemSizeManager {
                     if (capW > 0 && capH > 0) {
                         registerCapacityShape(item, capW, capH);
                     }
+                    int[] capacity = readCapacity(obj);
+                    if (capacity[0] >= 0) CUSTOM_SLOTS.put(item, capacity[0]);
+                    if (capacity[1] > 0) CUSTOM_CAP_WIDTH.put(item, capacity[1]);
                     if (obj.has("grid_color")) {
                         Integer color = parseColor(obj.get("grid_color"));
                         if (color != null) {
@@ -243,7 +324,7 @@ public class ItemSizeManager {
                 for (JsonElement el : nbtItems) {
                     if (!el.isJsonObject()) continue;
                     JsonObject obj = el.getAsJsonObject();
-                    if (obj.has("id") && obj.has("nbt_key") && obj.has("nbt_value") && obj.has("width") && obj.has("height")) {
+                    if (obj.has("id") && obj.has("nbt_key") && obj.has("nbt_value")) {
                         String itemIdText = obj.get("id").getAsString();
                         if (itemIdText == null || itemIdText.isBlank()) continue;
                         ResourceLocation id = ResourceLocation.tryParse(itemIdText);
@@ -254,18 +335,37 @@ public class ItemSizeManager {
                         String key = obj.get("nbt_key").getAsString();
                         String value = obj.get("nbt_value").getAsString();
                         if (key == null || value == null) continue;
-                        int w = obj.get("width").getAsInt();
-                        int h = obj.get("height").getAsInt();
-                        
-                        if (w > 0 && h > 0) {
-                            registerNbtSize(item, key, value, w, h);
-                        }
+                        int w = obj.has("width") ? obj.get("width").getAsInt() : -1;
+                        int h = obj.has("height") ? obj.get("height").getAsInt() : -1;
+                        int[] capacity = readCapacity(obj);
+                        NBT_RULES.add(new NbtRule(item, key, value, w, h, capacity[0], capacity[1], parseColor(obj.get("grid_color"))));
                     }
                 }
             }
         } catch (Exception e) {
             BlockZ.LOGGER.error("Failed to load custom grid item sizes", e);
         }
+    }
+
+    private static int[] readCapacity(JsonObject obj) {
+        int columns = obj.has("cap_width") ? obj.get("cap_width").getAsInt() : -1;
+        int rows = obj.has("cap_height") ? obj.get("cap_height").getAsInt() : -1;
+        int slots = columns > 0 && rows > 0 ? Math.multiplyExact(columns, rows) : -1;
+        if (obj.has("capacity")) {
+            var shape = obj.getAsJsonArray("capacity");
+            if (shape.size() != 2) throw new IllegalArgumentException("capacity requires [rows, columns]");
+            rows = shape.get(0).getAsInt();
+            columns = shape.get(1).getAsInt();
+            if (rows < 1 || columns < 1 || (long) rows * columns > MAX_STORAGE_SLOTS) {
+                throw new IllegalArgumentException("capacity requires 1 to 256 cells");
+            }
+        }
+        if (obj.has("size")) {
+            slots = obj.get("size").getAsInt();
+            if (slots < 0) throw new IllegalArgumentException("size must be 0 to 256");
+        }
+        if (slots < -1 || slots > MAX_STORAGE_SLOTS) throw new IllegalArgumentException("size must be 0 to 256");
+        return new int[]{slots, columns};
     }
 
     private static void registerDefaults() {
@@ -454,6 +554,75 @@ public class ItemSizeManager {
         }
     }
 
+    public static boolean saveCapacityRule(ItemStack stack, int capWidth, int capHeight) {
+        if (!isMeshVariant(stack)) return saveCapacityRule(stack.getItem(), capWidth, capHeight);
+        JsonObject update = new JsonObject();
+        update.addProperty("cap_width", capWidth);
+        update.addProperty("cap_height", capHeight);
+        update.addProperty("size", capWidth * capHeight);
+        return saveVariantRule(stack, update);
+    }
+
+    public static boolean saveItemRule(ItemStack stack, int width, int height, Integer color) {
+        if (!isMeshVariant(stack)) return saveItemRule(stack.getItem(), width, height, color);
+        JsonObject update = new JsonObject();
+        update.addProperty("width", width);
+        update.addProperty("height", height);
+        if (color != null) update.addProperty("grid_color", String.format("#%08X", color));
+        return saveVariantRule(stack, update);
+    }
+
+    private static boolean isMeshVariant(ItemStack stack) {
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return id != null && id.getNamespace().equals("mesharmoury") && stack.hasTag()
+                && stack.getTag().contains("armor_id", net.minecraft.nbt.Tag.TAG_STRING);
+    }
+
+    private static boolean saveVariantRule(ItemStack stack, JsonObject update) {
+        Path directory = FMLPaths.CONFIGDIR.get().resolve("blockz");
+        Path path = directory.resolve("grid_items.json");
+        ensureConfigFile(directory, path);
+        try {
+            JsonObject root;
+            try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                JsonReader jsonReader = new JsonReader(reader);
+                jsonReader.setLenient(true);
+                root = JsonParser.parseReader(jsonReader).getAsJsonObject();
+            }
+            var rules = root.has("nbt_items") ? root.getAsJsonArray("nbt_items") : new com.google.gson.JsonArray();
+            root.add("nbt_items", rules);
+            String id = ForgeRegistries.ITEMS.getKey(stack.getItem()).toString();
+            String armorId = stack.getTag().getString("armor_id");
+            JsonObject target = null;
+            for (JsonElement element : rules) {
+                if (!element.isJsonObject()) continue;
+                JsonObject rule = element.getAsJsonObject();
+                if (rule.has("id") && rule.has("nbt_key") && rule.has("nbt_value")
+                        && id.equals(rule.get("id").getAsString()) && "armor_id".equals(rule.get("nbt_key").getAsString())
+                        && armorId.equals(rule.get("nbt_value").getAsString())) {
+                    target = rule;
+                    break;
+                }
+            }
+            if (target == null) {
+                target = new JsonObject();
+                target.addProperty("id", id);
+                target.addProperty("nbt_key", "armor_id");
+                target.addProperty("nbt_value", armorId);
+                rules.add(target);
+            }
+            if (update.has("cap_width")) target.remove("capacity");
+            if (update.has("width")) target.remove("grid_color");
+            for (var entry : update.entrySet()) target.add(entry.getKey(), entry.getValue());
+            Files.writeString(path, GSON.toJson(root), StandardCharsets.UTF_8);
+            loadCustomSizes();
+            return true;
+        } catch (java.io.IOException | RuntimeException exception) {
+            BlockZ.LOGGER.error("Failed to save armor variant rule for {}", stack, exception);
+            return false;
+        }
+    }
+
     public static boolean saveCapacityRule(Item item, int capWidth, int capHeight) {
         if (item == null || item == Items.AIR || capWidth <= 0 || capHeight <= 0) {
             return false;
@@ -491,6 +660,8 @@ public class ItemSizeManager {
                     : new JsonObject();
             itemObject.addProperty("cap_width", capWidth);
             itemObject.addProperty("cap_height", capHeight);
+            itemObject.addProperty("size", capWidth * capHeight);
+            itemObject.remove("capacity");
             itemsObject.add(itemId.toString(), itemObject);
 
             Files.writeString(filePath, GSON.toJson(root), StandardCharsets.UTF_8);

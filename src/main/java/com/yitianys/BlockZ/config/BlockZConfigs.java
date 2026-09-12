@@ -14,10 +14,8 @@ public class BlockZConfigs {
     public static ForgeConfigSpec.BooleanValue enableGridSystem;
     public static ForgeConfigSpec.DoubleValue uiScale;
     public static ForgeConfigSpec.BooleanValue enableDayzInventory;
-    public static ForgeConfigSpec.BooleanValue allowPlayerToggleDayz;
     public static ForgeConfigSpec.BooleanValue showDayzHud;
     public static ForgeConfigSpec.BooleanValue enableHealthSystem;
-    public static ForgeConfigSpec.BooleanValue showDayzToggleChatHint;
     public static ForgeConfigSpec.BooleanValue enableNursingSystem;
     public static ForgeConfigSpec.BooleanValue enableBleeding;
     public static ForgeConfigSpec.BooleanValue enableBrokenLegs;
@@ -112,10 +110,8 @@ public class BlockZConfigs {
     private static boolean s_enableGridSystem;
     private static double s_uiScale;
     private static boolean s_enableDayzInventory;
-    private static boolean s_allowPlayerToggleDayz;
     private static boolean s_showDayzHud;
     private static boolean s_enableHealthSystem;
-    private static boolean s_showDayzToggleChatHint;
     private static boolean s_enableNursingSystem;
     private static boolean s_enableBleeding;
     private static boolean s_enableBrokenLegs;
@@ -171,7 +167,7 @@ public class BlockZConfigs {
 
     public static void setSyncedValues(
         int gridCols, int gridRows, boolean enableGridSystem, double uiScale, boolean enableDayzInventory,
-        boolean allowPlayerToggleDayz, boolean showDayzHud, boolean enableHealthSystem, boolean showDayzToggleChatHint, boolean enableNursingSystem, boolean enableBleeding,
+        boolean showDayzHud, boolean enableHealthSystem, boolean enableNursingSystem, boolean enableBleeding,
         boolean enableBrokenLegs, double baseBleedingChance, double brokenLegChanceMultiplier, double brokenLegMaxChance,
         boolean enableVanillaBackpackLock, int initialPocketSlots, boolean replaceVanillaWalkBobbing,
         double walkSwayStrength, double walkSwaySpeed, double idleSwayStrength,
@@ -194,10 +190,8 @@ public class BlockZConfigs {
         s_enableGridSystem = enableGridSystem;
         s_uiScale = uiScale;
         s_enableDayzInventory = enableDayzInventory;
-        s_allowPlayerToggleDayz = allowPlayerToggleDayz;
         s_showDayzHud = showDayzHud;
         s_enableHealthSystem = enableHealthSystem;
-        s_showDayzToggleChatHint = showDayzToggleChatHint;
         s_enableNursingSystem = enableNursingSystem;
         s_enableBleeding = enableBleeding;
         s_enableBrokenLegs = enableBrokenLegs;
@@ -259,10 +253,8 @@ public class BlockZConfigs {
 
     public static double getUiScale() { return isSynced ? s_uiScale : uiScale.get(); }
     public static boolean isDayzInventoryEnabled() { return isSynced ? s_enableDayzInventory : enableDayzInventory.get(); }
-    public static boolean getAllowPlayerToggleDayz() { return isSynced ? s_allowPlayerToggleDayz : allowPlayerToggleDayz.get(); }
     public static boolean getShowDayzHud() { return isSynced ? s_showDayzHud : showDayzHud.get(); }
     public static boolean isHealthSystemEnabled() { return isSynced ? s_enableHealthSystem : enableHealthSystem.get(); }
-    public static boolean getShowDayzToggleChatHint() { return isSynced ? s_showDayzToggleChatHint : showDayzToggleChatHint.get(); }
     public static boolean getEnableVanillaBackpackLock() { return isSynced ? s_enableVanillaBackpackLock : enableVanillaBackpackLock.get(); }
     
     public static boolean shouldReplaceVanillaWalkBobbing() { return isSynced ? s_replaceVanillaWalkBobbing : replaceVanillaWalkBobbing.get(); }
@@ -309,7 +301,7 @@ public class BlockZConfigs {
         }
     }
 
-    public static boolean isCustomMainMenuEnabled() { return getConfigValue(enableCustomMainMenu, true); }
+    public static boolean isCustomMainMenuEnabled() { return getConfigValue(enableCustomMainMenu, false); }
     public static int getMainMenuBackgroundRotationSpeed() { return getConfigValue(mainMenuBackgroundRotationSpeed, 20); }
     public static double getMainMenuBackgroundTransitionStep() { return getConfigValue(mainMenuBackgroundTransitionStep, 0.015D); }
     public static double getMainMenuCameraSwayStrength() { return getConfigValue(mainMenuCameraSwayStrength, 12.0D); }
@@ -384,10 +376,8 @@ public class BlockZConfigs {
         gridRows = b.comment("网格行数 / Grid rows").defineInRange("grid.rows", 4, 1, 20);
         uiScale = b.comment("UI 缩放 / UI scale").defineInRange("ui.scale", 1.0, 0.5, 2.0);
         enableDayzInventory = b.comment("是否启用 DayZ 背包界面 / Enable DayZ inventory UI").define("ui.enable_dayz_inventory", true);
-        allowPlayerToggleDayz = b.comment("允许玩家切换 DayZ 界面 / Allow player toggle").define("ui.allow_player_toggle", true);
         showDayzHud = b.comment("显示 DayZ HUD 覆盖层 / Show DayZ HUD overlay").define("ui.show_dayz_hud", true);
         enableHealthSystem = b.comment("是否启用健康值系统 / Enable custom health system").define("ui.enable_health_system", true);
-        showDayzToggleChatHint = b.comment("显示 DayZ 切换提示 / Show DayZ toggle chat hint").define("ui.show_dayz_toggle_hint", true);
         enableNursingSystem = b.comment("是否启用护理系统（伤口/骨折/绷带等） / Enable nursing system").define("ui.enable_nursing_system", true);
         enableBleeding = b.comment("是否启用流血效果 / Enable bleeding").define("ui.enable_bleeding", true);
         enableBrokenLegs = b.comment("是否启用骨折效果 / Enable broken legs").define("ui.enable_broken_legs", true);
@@ -395,7 +385,8 @@ public class BlockZConfigs {
         brokenLegChanceMultiplier = b.comment("骨折概率倍率（fallDistance/maxFallDistance * multiplier） / Broken leg chance multiplier").defineInRange("ui.broken_leg_chance_multiplier", 0.35D, 0.0D, 1.0D);
         brokenLegMaxChance = b.comment("骨折概率上限 / Broken leg max chance").defineInRange("ui.broken_leg_max_chance", 0.85D, 0.0D, 1.0D);
         enableVanillaBackpackLock = b.comment("是否启用原版背包锁定机制 / Enable vanilla backpack locking").define("ui.enable_vanilla_lock", true);
-        initialPocketSlots = b.comment("初始口袋格子数 (无背包时) / Initial pocket slots (without backpack)").defineInRange("ui.initial_pocket_slots", 5, 0, 27);
+        initialPocketSlots = b.comment("初始口袋格子数 (无背包时) / Initial pocket slots (without backpack)")
+                .translation("config.blockz.ui.initial_pocket_slots").defineInRange("ui.initial_pocket_slots", 27, 0, 27);
         b.pop();
 
         b.push("camera");
@@ -418,7 +409,7 @@ public class BlockZConfigs {
         focusFovSmoothing = b.comment("注视缩放平滑速度 / Focus zoom smoothing speed")
                 .defineInRange("focus_fov_smoothing", 0.28D, 0.01D, 1.0D);
         enableRealFirstPerson = b.comment("是否启用真实第一人称身体渲染 / Enable true first-person body rendering")
-                .define("enable_real_first_person", true);
+                .define("enable_real_first_person", false);
         enableThirdPersonShoulderCamera = b.comment("是否启用 DayZ 风格第三人称越肩视角 / Enable DayZ-style third-person shoulder camera")
                 .define("enable_third_person_shoulder_camera", true);
         thirdPersonShoulderDefaultRight = b.comment("第三人称默认使用右肩视角，关闭则默认左肩 / Use right shoulder as default third-person shoulder")
@@ -472,7 +463,7 @@ public class BlockZConfigs {
         b.pop();
 
         b.push("lean");
-        enableLeanSystem = b.comment("是否启用左右探头系统 (Q/E键) / Enable lean system (Q/E keys)").define("lean.enable", true);
+        enableLeanSystem = b.comment("是否启用左右探头系统 (Q/E键) / Enable lean system (Q/E keys)").define("lean.enable", false);
         leanOffset = b.comment("探头身体偏移量 (格) / Lean body offset in blocks").defineInRange("lean.offset", 0.45D, 0.05D, 0.8D);
         leanAngleDegrees = b.comment("探头侧倾角度 (度) / Lean tilt angle in degrees").defineInRange("lean.angle_degrees", 28.0D, 5.0D, 60.0D);
         leanAnimationDuration = b.comment("探头动画总时长 (秒) / Total lean animation duration in seconds").defineInRange("lean.animation_duration", 0.20D, 0.01D, 2.0D);
@@ -483,7 +474,7 @@ public class BlockZConfigs {
         b.pop();
 
         b.push("mainmenu");
-        enableCustomMainMenu = b.comment("是否启用 BlockZ 自定义主菜单 / Enable BlockZ custom main menu").define("enable_custom_mainmenu", true);
+        enableCustomMainMenu = b.comment("是否启用 BlockZ 自定义主菜单 / Enable BlockZ custom main menu").define("enable_custom_mainmenu", false);
         mainMenuBackgroundRotationSpeed = b.comment("主菜单背景轮换速度(秒)，0为不自动轮换 / Main menu background rotation speed in seconds, 0 to disable").defineInRange("background_rotation_speed", 20, 0, 3600);
         mainMenuBackgroundTransitionStep = b.comment("主菜单背景过渡速度(每tick alpha步进) / Main menu background transition alpha step per tick").defineInRange("background_transition_step", 0.015D, 0.001D, 0.2D);
         mainMenuCameraSwayStrength = b.comment("主菜单镜头鼠标晃动强度(像素) / Main menu camera sway strength in pixels").defineInRange("camera_sway_strength", 12.0D, 0.0D, 60.0D);
@@ -524,6 +515,9 @@ public class BlockZConfigs {
 
         int customSlots = ItemSizeManager.getCustomSlots(stack);
         if (customSlots >= 0) return customSlots;
+
+        int meshSlots = com.yitianys.BlockZ.compat.MeshEquipment.storageSize(stack);
+        if (meshSlots >= 0) return meshSlots;
 
         String name = rl.getPath();
         if (name.equals("backpack_coyote")) return getBackpackCoyoteSlots();

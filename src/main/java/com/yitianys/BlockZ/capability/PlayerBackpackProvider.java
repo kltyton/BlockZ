@@ -13,12 +13,15 @@ import org.jetbrains.annotations.Nullable;
 public class PlayerBackpackProvider implements ICapabilityProvider, net.minecraftforge.common.util.INBTSerializable<CompoundTag> {
     public static Capability<PlayerBackpack> PLAYER_BACKPACK = CapabilityManager.get(new CapabilityToken<PlayerBackpack>() { });
 
+    private final net.minecraft.world.entity.player.Player owner;
+    public PlayerBackpackProvider() { this(null); }
+    public PlayerBackpackProvider(net.minecraft.world.entity.player.Player owner) { this.owner = owner; }
     private PlayerBackpack backpack = null;
     private final LazyOptional<PlayerBackpack> optional = LazyOptional.of(this::createPlayerBackpack);
 
     private PlayerBackpack createPlayerBackpack() {
         if (this.backpack == null) {
-            this.backpack = new PlayerBackpack();
+            this.backpack = new PlayerBackpack(owner);
         }
         return this.backpack;
     }
